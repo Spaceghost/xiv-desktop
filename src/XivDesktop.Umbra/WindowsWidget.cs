@@ -88,6 +88,7 @@ public sealed class WindowsWidget(
 
     private readonly MenuPopup _menuPopup = new();
     private WindowsMenu? _menu;
+    private bool _menuOver;
 
     public override WidgetPopup Popup => _menuPopup;
 
@@ -119,6 +120,7 @@ public sealed class WindowsWidget(
     protected override void OnUnload()
     {
         _strip.Remove(true);
+        GameCursor.Update("windows-menu:" + Id, false);
         _menuPopup.OnPopupOpen -= Menu.OnOpened;
         _menuPopup.OnPopupClose -= Menu.OnClosed;
         _client = null;
@@ -128,6 +130,10 @@ public sealed class WindowsWidget(
     {
         var client = _client;
         if (client is null) return;
+        // Umbra's MenuPopup is not ours to subclass: keep the game cursor over it from here.
+        if (_menuPopup.IsOpen) _menuOver = AppsPopup.IsOver(_menuPopup);
+        else _menuOver = false;
+        GameCursor.Update("windows-menu:" + Id, _menuOver);
         var w = client.Windows;
         if (client.State == DesktopLinkState.Missing || w is null)
         {

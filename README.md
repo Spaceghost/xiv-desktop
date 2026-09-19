@@ -100,20 +100,42 @@ a subtitle and a provider badge.
 | Provider | Rows | Enter does |
 | --- | --- | --- |
 | **App** | the catalog; favourites and recents rank higher and fill the empty query | launch |
-| **Window** | open window panels from `window.list`, with app, pet/pin and workspace | focus (switches to its workspace first) |
+| **Panel** | every ghostty panel from `panel.list`: terminals, windows, adopted windows, chat; kind badge, view (dropdown, tab, pet, pin, hud, min, full, hidden), title. Ranked first on an empty query and alone with `w:` | `panel.focus` (a window on another workspace switches there first) |
+| **Window** | only on a ghostty-dalamud without `panel.list`: window panels from `window.list` | focus |
 | **Action** | close window, pin here, make pet, workspace N, move to workspace N, reload apps, app grid | run it on the target panel |
 | **Calc** | arithmetic (`2+2`, `sqrt 2`, `2^10 % 7`, `max(3, 9)`, `2*pi`) | copy the result to the clipboard |
 | **Command** | `/term`, `/term new`, `/term pin pet`, `/window pull`, `ask <question>`, any `/command` | post it to ghostty-dalamud, or run the command |
 
-Prefixes narrow it to one provider: `a:` apps, `w:` windows, `=` calculator, `>` commands and actions.
+Prefixes narrow it to one provider: `a:` apps, `w:` panels, `=` calculator, `>` commands and actions.
 Without a prefix, arithmetic shows a Calc row at the top and actions appear once something is typed.
 Matching is fuzzy (a subsequence; contiguous runs and word starts score higher), apps keep v0's
 name/keyword/generic-name scoring.
 
-**Keys:** Up/Down, Ctrl+J/K (or Ctrl+N/P, Tab/Shift+Tab) select, PageUp/PageDown jump, Enter runs, Esc
-closes. The palette opens centred in the upper part of the screen, or in the other half when the mouse
+**Keys:** Up/Down or Ctrl+J/K select, PageUp/PageDown jump, Enter runs, Esc closes. A panel row also has
+keyboard actions, shown as chips above the footer:
+
+| Key | On the selected panel |
+| --- | --- |
+| Enter | focus it (`panel.focus`) |
+| Ctrl+P | pet ↔ pin (`panel.toggle_pet`) |
+| Ctrl+H | dock it to the HUD (`panel.place {"pin": "hud"}`, an assumption until ghostty documents the HUD pin) |
+| Ctrl+M | minimize (`panel.minimize`) |
+| Ctrl+W | close (`panel.close`) |
+| Alt+Left / Alt+Right | move it left / right in ghostty's panel order (`panel.order`) |
+| Alt+Home / Alt+End | move it first / last |
+
+Tab and Shift+Tab cycle through the chips and Enter runs the highlighted one, so everything works without a
+mouse. These actions keep the palette open (focus closes it). Without `panel.list` (an older ghostty),
+window rows get the same keys: close, pin/pet and HUD fall back to `window.*`; minimize and reorder report
+that they need the panel IPC. The panel methods are built against their documented shapes and tested with
+JSON fixtures; ghostty's side was still in progress when they were written. The palette opens centred in the upper part of the screen, or in the other half when the mouse
 would be over it, and takes keyboard focus. It closes when it loses focus (Settings → General). Its style
 (rounded, translucent, one violet accent) is pushed only around this window.
+
+**Cursor.** XivDesktop keeps the game's own cursor: while the pointer is over any XivDesktop window
+(palette, app grid, settings) or one of its Umbra popups, it sets ImGui's `NoMouseCursorChange` so Dalamud
+leaves the cursor alone, and clears it again when the pointer leaves (only if XivDesktop set it). It never
+sets an ImGui cursor itself. Unverified in game.
 
 The **target panel** for actions is the panel ghostty reports as focused, else the last one focused
 through XivDesktop, else the newest one on the current workspace.

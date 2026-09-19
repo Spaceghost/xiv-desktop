@@ -1,3 +1,4 @@
+using XivDesktop.Core.Input;
 using XivDesktop.Core.Windows;
 using XivDesktop.Core.Workspaces;
 
@@ -5,6 +6,8 @@ namespace XivDesktop.Core.Palette;
 
 public enum PaletteProvider
 {
+    /// <summary>Any ghostty panel from panel.list: terminals, windows, adopted windows, chat.</summary>
+    Panel,
     App,
     Window,
     Action,
@@ -54,6 +57,16 @@ public sealed record PaletteCommand(string Kind, string Arg = "", long Id = 0, i
     public const string Post = "post";         // Arg: a /term line for ghostty-dalamud (without "/term ")
     public const string Chat = "chat";         // Arg: a slash command line ("/xlplugins")
     public const string Grid = "grid";         // open the app grid
+    public const string TogglePet = "toggle-pet"; // Id: panel
+    public const string Minimize = "minimize"; // Id: panel
+    public const string Order = "order";       // Id: panel, Arg: left | right | first | last | N
+}
+
+/// <summary>A keyboard action on a palette row: its label, its chord, and what it runs.</summary>
+public sealed record RowAction(string Label, KeyChord Chord, PaletteCommand Command)
+{
+    /// <summary>Short chord text for the hint chip ("Ctrl+P", "Alt+Left", or "Enter" for the primary action).</summary>
+    public string Hint => Chord.IsNone ? "Enter" : Chord.ToString();
 }
 
 public sealed record PaletteItem
@@ -65,7 +78,7 @@ public sealed record PaletteItem
     public string Subtitle { get; init; } = "";
 
     /// <summary>Short provider label shown as a badge ("App", "Window", …).</summary>
-    public string Badge => Provider switch
+    public string Badge => BadgeText ?? Provider switch
     {
         PaletteProvider.App => "App",
         PaletteProvider.Window => "Window",
@@ -73,6 +86,15 @@ public sealed record PaletteItem
         PaletteProvider.Calc => "Calc",
         _ => "Command",
     };
+
+    /// <summary>Replaces the provider badge (panel rows show their kind: Terminal, Window, Adopted, Chat).</summary>
+    public string? BadgeText { get; init; }
+
+    /// <summary>For panel rows: terminal | window | adopted | chat.</summary>
+    public string? PanelKind { get; init; }
+
+    /// <summary>For panel rows: dropdown | tab | pet | pin | hud | min | full | hidden.</summary>
+    public string? PanelView { get; init; }
 
     public double Score { get; init; }
 
@@ -104,6 +126,9 @@ public sealed record PaletteContext
     public IReadOnlyList<string> Recents { get; init; } = [];
 
     public IReadOnlyList<WindowPanel> Windows { get; init; } = [];
+
+    /// <summary>ghostty's panels (panel.list), or null: then window rows come from <see cref="Windows"/>.</summary>
+    public PanelListSnapshot? Panels { get; init; }
 
     /// <summary>The panel window actions apply to (focused, else last focused), if any.</summary>
     public long? TargetWindow { get; init; }
@@ -142,7 +167,12 @@ public static class PaletteEngine
         if (all || q.Filter == PaletteFilter.Apps)
             Apps(items, ctx, q.Text);
         if (all || q.Filter == PaletteFilter.Windows)
-            Windows(items, ctx, q.Text);
+        {
+            if (ctx.Panels != null)
+                PanelRows(items, ctx, q.Text);
+            else
+                Windows(items, ctx, q.Text);
+        }
         if (all || q.Filter == PaletteFilter.Commands)
         {
             Commands(items, ctx, q.Text, forced: q.Filter == PaletteFilter.Commands);
@@ -275,6 +305,103 @@ public static class PaletteEngine
             });
         }
     }
+
+    private static void PanelRows(List<PaletteItem> items, PaletteContext ctx, string text)
+    {
+        var n = 0;
+        foreach (var p in ctx.Panels!.Panels)
+        {
+            var title = p.DisplayName;
+            double score;
+            int[] hl = [];
+            if (text.Length == 0)
+            {
+                // Panels rank first on an empty query, in ghostty's order; the focused one on top.
+                score = 450 - Math.Min(40, n) + (p.Focused ? 10 : 0) - (p.IsHidden ? 45 : 0);
+            }
+            else
+            {
+                var m = Fuzzy.Match(title, text);
+                FuzzyMatch? other = null;
+                if (m == null)
+                {
+                    foreach (var alt in new[] { p.App, p.Profile, p.Kind, p.View })
+                    {
+                        if (alt.Length > 0 && Fuzzy.Match(alt, text) is { } am && (other == null || am.Score > other.Score))
+                            other = am;
+                    }
+                }
+
+                if (m == null && other == null)
+                    continue;
+
+                // Title matches beat app matches of the same quality; panels edge out apps on equal fuzzy terms.
+                score = (m?.Score ?? other!.Score * 0.8) + 20;
+                hl = m?.Positions ?? [];
+            }
+
+            n++;
+            var parts = new List<string> { p.View.Length > 0 ? p.View : "?" };
+            if (p.App.Length > 0 && p.App != title)
+                parts.Add(p.App);
+            else if (p.Profile.Length > 0 && p.Profile != title)
+                parts.Add(p.Profile);
+            var ws = p.Kind == "window" ? ctx.WorkspaceOf(p.Id) : 0;
+            if (ws > 0)
+                parts.Add($"workspace {ws}");
+            if (p.Running == true)
+                parts.Add("running");
+            if (p.Focused)
+                parts.Add("focused");
+            items.Add(new PaletteItem
+            {
+                Provider = PaletteProvider.Panel,
+                Title = title,
+                Subtitle = string.Join(" · ", parts),
+                BadgeText = p.Kind.Length > 0 ? char.ToUpperInvariant(p.Kind[0]) + p.Kind[1..] : "Panel",
+                PanelKind = p.Kind,
+                PanelView = p.View,
+                Score = score,
+                Highlights = hl,
+                Command = new PaletteCommand(PaletteCommand.Focus, Id: p.Id),
+                WindowId = p.Id,
+            });
+        }
+    }
+
+    /// <summary>
+    /// The keyboard actions of a row. Panel and window rows: Enter focuses, Ctrl+P pet/pin, Ctrl+H dock to
+    /// the HUD, Ctrl+M minimize, Ctrl+W close, Alt+Left/Right move in the order, Alt+Home/End first/last.
+    /// Other rows have only their Enter action.
+    /// </summary>
+    public static List<RowAction> RowActions(PaletteItem item)
+    {
+        var primary = new RowAction(item.Provider switch
+        {
+            PaletteProvider.Panel or PaletteProvider.Window => "Focus",
+            PaletteProvider.App => "Launch",
+            PaletteProvider.Calc => "Copy",
+            _ => "Run",
+        }, KeyChord.None, item.Command);
+        if (item.Provider is not (PaletteProvider.Panel or PaletteProvider.Window) || item.WindowId is not { } id)
+            return [primary];
+        return
+        [
+            primary,
+            new RowAction(item.PanelView == "pet" ? "Pin" : "Pet", KeyChord.Parse("Ctrl+P"), new PaletteCommand(PaletteCommand.TogglePet, Id: id)),
+            new RowAction("HUD", KeyChord.Parse("Ctrl+H"), new PaletteCommand(PaletteCommand.Place, "hud", id)),
+            new RowAction("Minimize", KeyChord.Parse("Ctrl+M"), new PaletteCommand(PaletteCommand.Minimize, Id: id)),
+            new RowAction("Close", KeyChord.Parse("Ctrl+W"), new PaletteCommand(PaletteCommand.Close, Id: id)),
+            new RowAction("Left", KeyChord.Parse("Alt+Left"), new PaletteCommand(PaletteCommand.Order, "left", id)),
+            new RowAction("Right", KeyChord.Parse("Alt+Right"), new PaletteCommand(PaletteCommand.Order, "right", id)),
+            new RowAction("First", KeyChord.Parse("Alt+Home"), new PaletteCommand(PaletteCommand.Order, "first", id)),
+            new RowAction("Last", KeyChord.Parse("Alt+End"), new PaletteCommand(PaletteCommand.Order, "last", id)),
+        ];
+    }
+
+    /// <summary>The row action bound to <paramref name="chord"/>, if any.</summary>
+    public static RowAction? ActionFor(PaletteItem item, KeyChord chord)
+        => chord.IsNone ? null : RowActions(item).FirstOrDefault(a => a.Chord == chord);
 
     private static void Commands(List<PaletteItem> items, PaletteContext ctx, string text, bool forced)
     {

@@ -40,6 +40,7 @@ public sealed class CommandRunner
             Favourites = desktop.Favourites,
             Recents = desktop.Recents,
             Windows = session.Windows.Snapshot.Windows,
+            Panels = session.Windows.PanelSnapshot,
             TargetWindow = target?.Id,
             WorkspaceOf = session.WorkspaceOf,
             CurrentWorkspace = session.CurrentWorkspace,
@@ -58,11 +59,17 @@ public sealed class CommandRunner
                 case PaletteCommand.Launch:
                     return desktop.Launch(c.Arg);
                 case PaletteCommand.Focus:
-                    return session.Focus(c.Id);
+                    return session.FocusPanel(c.Id);
+                case PaletteCommand.TogglePet:
+                    return session.PanelOp("toggle_pet", c.Id);
+                case PaletteCommand.Minimize:
+                    return session.PanelOp("minimize", c.Id);
+                case PaletteCommand.Order:
+                    return session.PanelOp("order", c.Id, c.Arg);
                 case PaletteCommand.Close:
-                    return c.Id != 0 ? session.Close(c.Id) : session.CloseTarget();
+                    return c.Id != 0 ? session.PanelOp("close", c.Id) : session.CloseTarget();
                 case PaletteCommand.Place:
-                    return c.Id != 0 ? session.Place(c.Id, c.Arg) : "error: no window panel to act on";
+                    return c.Id != 0 ? session.PanelOp("place", c.Id, c.Arg) : "error: no window panel to act on";
                 case PaletteCommand.Workspace:
                     return session.SwitchWorkspace(c.Number);
                 case PaletteCommand.Move:

@@ -1,5 +1,6 @@
 // Compact launcher popup (Una.Drawing nodes): search box, then either search results or the
 // favourites and recents. Button nodes are pooled; each frame only changes what differs.
+using Dalamud.Bindings.ImGui;
 using Dalamud.Interface;
 using Umbra.Common;
 using Umbra.Widgets;
@@ -113,6 +114,8 @@ public sealed class AppsPopup : WidgetPopup
 
     protected override Node Node { get; }
 
+    protected override void OnClose() => GameCursor.Update("apps", false);
+
     protected override void OnOpen()
     {
         _client.Invalidate();
@@ -121,6 +124,7 @@ public sealed class AppsPopup : WidgetPopup
 
     protected override void OnUpdate()
     {
+        GameCursor.Update("apps", IsOpen && Node.Bounds.MarginRect.Contains(ImGui.GetMousePos()));
         var state = _client.State;
         var ready = state == DesktopLinkState.Ready;
         var now = Environment.TickCount64;
@@ -198,6 +202,12 @@ public sealed class AppsPopup : WidgetPopup
             Logger.Warning("[Umbra.XivDesktop] popup action failed: " + ex.Message);
         }
     }
+
+    /// <summary>
+    /// The pointer is over an open popup whose node we cannot reach (Umbra's MenuPopup): then any hovered ImGui
+    /// window counts, which while that popup is open is the popup itself or the toolbar under it.
+    /// </summary>
+    internal static bool IsOver(WidgetPopup popup) => popup.IsOpen && ImGui.IsWindowHovered(ImGuiHoveredFlags.AnyWindow);
 
     internal static Node N(string cls, string? value = null)
     {
