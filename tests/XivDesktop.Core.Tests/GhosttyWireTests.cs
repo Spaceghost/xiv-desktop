@@ -140,3 +140,37 @@ public class GhosttyWireTests
         Assert.Empty(WindowDiff.Diff(s2, WindowListSnapshot.Empty)); // already ended: no second event
     }
 }
+
+public class WindowAppsTests
+{
+    private static readonly AppInfo[] Apps =
+    [
+        new() { Id = "org.gnome.TextEditor.desktop", Name = "Text Editor", Command = "gnome-text-editor" },
+        new() { Id = "yad-calendar.desktop", Name = "Calendar", Command = "/usr/bin/yad --calendar" },
+        new() { Id = "org.mozilla.firefox.desktop", Name = "Firefox", Command = "'/usr/bin/flatpak' run org.mozilla.firefox" },
+        new() { Id = "foot.desktop", Name = "Foot", Command = "foot" },
+    ];
+
+    [Theory]
+    [InlineData("yad", "", "yad-calendar.desktop")]
+    [InlineData("gnome-text-editor", "", "org.gnome.TextEditor.desktop")]
+    [InlineData("firefox", "", "org.mozilla.firefox.desktop")]
+    [InlineData("", "notes.txt - Text Editor", "org.gnome.TextEditor.desktop")]
+    [InlineData("", "Foot", "foot.desktop")]
+    [InlineData("unknown", "whatever", null)]
+    [InlineData("flatpak", "Mozilla Firefox - Firefox", "org.mozilla.firefox.desktop")]
+    [InlineData("flatpak", "", null)]
+    public void GuessesTheApp(string app, string title, string? id)
+        => Assert.Equal(id, WindowApps.Find(Apps, new WindowPanel { Id = 1, App = app, Title = title })?.Id);
+
+    [Fact]
+    public void RememberedLaunchWins()
+        => Assert.Equal("foot.desktop", WindowApps.Find(Apps, new WindowPanel { App = "yad" }, "foot.desktop")!.Id);
+
+    [Theory]
+    [InlineData("/usr/bin/yad --calendar", "yad")]
+    [InlineData("'/opt/My App/run' --x", "run")]
+    [InlineData("  foot ", "foot")]
+    [InlineData("", "")]
+    public void ProgramOfACommand(string cmd, string prog) => Assert.Equal(prog, WindowApps.Program(cmd));
+}

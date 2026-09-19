@@ -1,4 +1,5 @@
 using Dalamud.Game.Command;
+using Dalamud.Interface.ImGuiNotification;
 using Dalamud.Interface.Windowing;
 using Dalamud.Plugin;
 using Dalamud.Plugin.Services;
@@ -25,7 +26,11 @@ public sealed class Plugin : IDalamudPlugin
     private readonly List<IDisposable> disposables = [];
     private readonly WindowSystem windowSystem = new("XivDesktop");
     private readonly DesktopService desktop = null!;
+    private readonly SessionService session = null!;
     private readonly LauncherWindow launcher = null!;
+    private readonly PaletteWindow palette = null!;
+    private readonly SettingsWindow settings = null!;
+    private readonly INotificationManager notifications;
     private bool commandRegistered;
 
     public Plugin(
@@ -34,8 +39,11 @@ public sealed class Plugin : IDalamudPlugin
         IFramework framework,
         ICommandManager commands,
         IChatGui chat,
-        ITextureProvider textures)
+        ITextureProvider textures,
+        IKeyState keys,
+        INotificationManager notifications)
     {
+        this.notifications = notifications;
         this.pluginInterface = pluginInterface;
         this.log = log;
         this.framework = framework;
@@ -46,20 +54,31 @@ public sealed class Plugin : IDalamudPlugin
         {
             var config = Configuration.Load(pluginInterface);
             var catalog = Track(new CatalogService(pluginInterface, log, () => config.HomeOverride));
-            ILaunchBackend backend = new GhosttyPostBackend(pluginInterface);
-            desktop = new DesktopService(pluginInterface, framework, log, config, catalog, backend);
+            // GhosttyDalamud.v1.Call when registered; it falls back to the Post gate for launching.
+            var ghostty = Track(new GhosttyCallBackend(pluginInterface, framework, log));
+            desktop = new DesktopService(pluginInterface, framework, log, config, catalog, ghostty);
+            session = Track(new SessionService(ghostty, ghostty.Post, desktop, config, framework, notifications, log));
+            var runner = new CommandRunner(desktop, session, commands, log);
 
             launcher = new LauncherWindow(desktop, textures, config);
+            palette = new PaletteWindow(runner, desktop, session, textures, pluginInterface, config);
+            runner.TogglePalette = palette.Toggle;
+            runner.ToggleGrid = launcher.Toggle;
+            var keybinds = Track(new KeybindService(framework, keys, log, config, action => OnKey(runner, action)));
+            settings = new SettingsWindow(config, desktop, session, keybinds);
             windowSystem.AddWindow(launcher);
+            windowSystem.AddWindow(palette);
+            windowSystem.AddWindow(settings);
             pluginInterface.UiBuilder.Draw += DrawUi;
             pluginInterface.UiBuilder.OpenMainUi += OpenMainUi;
+            pluginInterface.UiBuilder.OpenConfigUi += OpenConfigUi;
 
             commandRegistered = commands.AddHandler(Command, new CommandInfo(OnCommand)
             {
-                HelpMessage = "Toggle the app launcher. \"/desktop launch <app>\", \"/desktop reload\", \"/desktop status\", \"/desktop <search>\".",
+                HelpMessage = "Toggle the launcher palette. \"/desktop apps\" (app grid), \"/desktop settings\", \"/desktop ws <1-9>\", \"/desktop windows\", \"/desktop launch <app>\", \"/desktop reload\", \"/desktop status\", \"/desktop <query>\".",
             });
 
-            Track(new DesktopIpc(pluginInterface, framework, log, desktop, text => launcher.Toggle(text)));
+            Track(new DesktopIpc(pluginInterface, framework, log, desktop, session, runner, text => palette.Toggle(text)));
 
             catalog.Reload();
         }
@@ -90,7 +109,30 @@ public sealed class Plugin : IDalamudPlugin
         }
     }
 
-    private void OpenMainUi() => launcher.Toggle("");
+    private void OpenMainUi() => palette.Toggle("");
+
+    private void OpenConfigUi() => settings.Toggle();
+
+    private void OnKey(CommandRunner runner, string action)
+    {
+        var result = runner.RunKey(action);
+        if (!result.StartsWith("error", StringComparison.Ordinal))
+            return;
+        try
+        {
+            notifications.AddNotification(new Notification
+            {
+                Title = "XivDesktop",
+                Content = result[7..],
+                Type = NotificationType.Warning,
+                InitialDuration = TimeSpan.FromSeconds(3),
+            });
+        }
+        catch
+        {
+            // Notifications unavailable; the result is logged by the session.
+        }
+    }
 
     private void OnCommand(string command, string arguments)
     {
@@ -103,7 +145,19 @@ public sealed class Plugin : IDalamudPlugin
             switch (verb)
             {
                 case "":
-                    launcher.Toggle("");
+                    palette.Toggle("");
+                    break;
+                case "apps" or "grid":
+                    launcher.Toggle(rest);
+                    break;
+                case "settings" or "config":
+                    settings.Toggle();
+                    break;
+                case "ws" or "workspace":
+                    Print(int.TryParse(rest, out var n) ? session.SwitchWorkspace(n) : $"workspace {session.CurrentWorkspace}; usage: {Command} ws <1-9>");
+                    break;
+                case "windows":
+                    PrintWindows();
                     break;
                 case "launch" or "run":
                     if (rest.Length == 0)
@@ -119,10 +173,10 @@ public sealed class Plugin : IDalamudPlugin
                     Print(desktop.Status().Summary);
                     break;
                 case "help":
-                    Print($"{Command} toggles the launcher; {Command} launch <app>; {Command} reload; {Command} status; {Command} <text> opens it with a search.");
+                    Print($"{Command} toggles the launcher palette; {Command} apps (app grid); {Command} settings; {Command} ws <1-9>; {Command} windows; {Command} launch <app>; {Command} reload; {Command} status; {Command} <text> opens the palette with a query.");
                     break;
                 default:
-                    launcher.Toggle(args);
+                    palette.Toggle(args);
                     break;
             }
         }
@@ -130,6 +184,20 @@ public sealed class Plugin : IDalamudPlugin
         {
             log.Error(ex, "{Command} failed", Command);
         }
+    }
+
+    private void PrintWindows()
+    {
+        var list = session.OpenPanels();
+        if (!session.Windows.WindowsAvailable)
+        {
+            Print("the window list needs ghostty-dalamud's GhosttyDalamud.v1.Call IPC");
+            return;
+        }
+
+        Print(list.Count == 0
+            ? $"no window panels (workspace {session.CurrentWorkspace})"
+            : $"workspace {session.CurrentWorkspace}: " + string.Join("; ", list.Select(w => $"#{w.Id} {w.DisplayName} [{w.State} {w.Kind}, ws {session.WorkspaceOf(w.Id)}]")));
     }
 
     private void Print(string message)
@@ -159,6 +227,7 @@ public sealed class Plugin : IDalamudPlugin
 
         pluginInterface.UiBuilder.Draw -= DrawUi;
         pluginInterface.UiBuilder.OpenMainUi -= OpenMainUi;
+        pluginInterface.UiBuilder.OpenConfigUi -= OpenConfigUi;
         windowSystem.RemoveAllWindows();
 
         for (var i = disposables.Count - 1; i >= 0; i--)

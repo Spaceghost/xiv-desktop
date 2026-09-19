@@ -33,9 +33,29 @@ public static class IpcContract
     /// <summary>Func&lt;string, bool&gt;: toggles an app id's favourite flag; returns the new state.</summary>
     public const string ToggleFavourite = "XivDesktop.v1.ToggleFavourite";
 
+    /// <summary>Func&lt;string&gt;: JSON object, see <see cref="WindowsPayload"/>: window panels with their workspaces.</summary>
+    public const string Windows = "XivDesktop.v1.Windows";
+
+    /// <summary>
+    /// Func&lt;int, string&gt;: 1..9 switches to that workspace; 0 only reports the current one. Returns
+    /// "ok: workspace N" or "error: REASON". The switch runs on the framework thread.
+    /// </summary>
+    public const string Workspace = "XivDesktop.v1.Workspace";
+
+    /// <summary>Func&lt;string, string&gt;: the palette's top results for a query, a JSON array of <see cref="PaletteResultPayload"/>.</summary>
+    public const string Palette = "XivDesktop.v1.Palette";
+
+    /// <summary>
+    /// Func&lt;string, string&gt;: a window action as JSON, see <see cref="WindowActionRequest"/>
+    /// (<c>{"action":"focus|close|pet|pin|place|move","id":12,"pin":"orbit 3","workspace":3}</c>).
+    /// Returns "ok: …" or "error: …"; "ok" means ghostty queued it.
+    /// </summary>
+    public const string WindowAction = "XivDesktop.v1.WindowAction";
+
     // ghostty-dalamud's gates (provided by ghostty-dalamud, consumed here).
     public const string GhosttyStatus = "GhosttyDalamud.v1.Status";
     public const string GhosttyPost = "GhosttyDalamud.v1.Post";
+    public const string GhosttyCall = "GhosttyDalamud.v1.Call";
 
     public static readonly JsonSerializerOptions Json = new()
     {
@@ -58,6 +78,29 @@ public static class IpcContract
         catch (JsonException)
         {
             return [];
+        }
+    }
+
+    /// <summary>Parses a Windows payload; null on malformed input (never throws).</summary>
+    public static WindowsPayload? ParseWindows(string? json) => TryParse<WindowsPayload>(json);
+
+    /// <summary>Parses a Palette payload; empty on malformed input (never throws).</summary>
+    public static List<PaletteResultPayload> ParsePalette(string? json) => TryParse<List<PaletteResultPayload>>(json) ?? [];
+
+    public static WindowActionRequest? ParseWindowAction(string? json) => TryParse<WindowActionRequest>(json);
+
+    private static T? TryParse<T>(string? json)
+        where T : class
+    {
+        if (string.IsNullOrWhiteSpace(json))
+            return null;
+        try
+        {
+            return JsonSerializer.Deserialize<T>(json, Json);
+        }
+        catch (JsonException)
+        {
+            return null;
         }
     }
 
@@ -118,4 +161,97 @@ public sealed record StatusPayload
 
     /// <summary>One-line human summary.</summary>
     public string Summary { get; init; } = "";
+}
+
+public sealed record WindowsPayload
+{
+    /// <summary>ghostty-dalamud's Call gate is registered (window list and actions work).</summary>
+    public bool Available { get; init; }
+
+    /// <summary>ghostty's window.list rev (-1 before the first answer).</summary>
+    public long Rev { get; init; } = -1;
+
+    /// <summary>Current workspace, 1..9.</summary>
+    public int Workspace { get; init; } = 1;
+
+    /// <summary>The panel window actions without an id apply to (focused, else last focused), if any.</summary>
+    public long? Target { get; init; }
+
+    public List<WindowPayload> Windows { get; init; } = [];
+}
+
+public sealed record WindowPayload
+{
+    public long Id { get; init; }
+
+    public string Title { get; init; } = "";
+
+    /// <summary>ghostty's "app": the program of a run command, the match text, or "".</summary>
+    public string App { get; init; } = "";
+
+    /// <summary>pending | live | ended.</summary>
+    public string State { get; init; } = "";
+
+    /// <summary>pet | pin | full | tab.</summary>
+    public string Kind { get; init; } = "";
+
+    public bool Focused { get; init; }
+
+    /// <summary>1..9, or 0 while not assigned yet.</summary>
+    public int Workspace { get; init; }
+
+    /// <summary>XivDesktop hid it (another workspace is current).</summary>
+    public bool Hidden { get; init; }
+
+    /// <summary>Best-guess desktop-file id from the catalog, for an icon; null when unknown.</summary>
+    public string? AppId { get; init; }
+}
+
+public sealed record PaletteResultPayload
+{
+    /// <summary>app | window | action | calc | command.</summary>
+    public string Provider { get; init; } = "";
+
+    public string Title { get; init; } = "";
+
+    public string Subtitle { get; init; } = "";
+
+    public double Score { get; init; }
+
+    public bool Enabled { get; init; }
+
+    public string? Reason { get; init; }
+
+    /// <summary>What running it would do: { kind, arg, id, number } (see PaletteCommand in Core).</summary>
+    public PaletteCommandPayload Command { get; init; } = new();
+
+    public string? AppId { get; init; }
+
+    public long? WindowId { get; init; }
+}
+
+public sealed record PaletteCommandPayload
+{
+    public string Kind { get; init; } = "";
+
+    public string Arg { get; init; } = "";
+
+    public long Id { get; init; }
+
+    public int Number { get; init; }
+}
+
+public sealed record WindowActionRequest
+{
+    /// <summary>focus | close | pet | pin (pin here) | place (with Pin) | move (with Workspace).</summary>
+    public string Action { get; init; } = "";
+
+    /// <summary>Panel id; 0 or missing means the target panel (focused, else last focused).</summary>
+    public long Id { get; init; }
+
+    /// <summary>For "place": /term pin arguments ("here", "orbit 3.5", "pet" …).</summary>
+    public string? Pin { get; init; }
+
+    /// <summary>For "move": 1..9.</summary>
+    public int Workspace { get; init; }
 }

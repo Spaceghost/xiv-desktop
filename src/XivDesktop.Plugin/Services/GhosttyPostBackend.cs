@@ -53,4 +53,7 @@ public sealed class GhosttyPostBackend : ILaunchBackend
     }
 
     public void Launch(string shellCommand) => post.InvokeAction(LaunchPlan.PostLine(shellCommand));
+
+    /// <summary>Posts a /term command line (without "/term "), e.g. "new" or "ask QUESTION". Framework thread; may throw.</summary>
+    public void Post(string line) => post.InvokeAction(line);
 }

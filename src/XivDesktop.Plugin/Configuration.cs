@@ -1,5 +1,7 @@
 using Dalamud.Configuration;
 using Dalamud.Plugin;
+using XivDesktop.Core.Input;
+using XivDesktop.Core.Workspaces;
 
 namespace XivDesktop.Plugin;
 
@@ -11,7 +13,7 @@ namespace XivDesktop.Plugin;
 [Serializable]
 public sealed class Configuration : IPluginConfiguration
 {
-    public const int CurrentVersion = 1;
+    public const int CurrentVersion = 2;
 
     public int Version { get; set; } = CurrentVersion;
 
@@ -30,6 +32,46 @@ public sealed class Configuration : IPluginConfiguration
     /// <summary>Close the launcher window after a successful launch.</summary>
     public bool CloseOnLaunch { get; set; } = true;
 
+    // v1 ---------------------------------------------------------------------------------------
+
+    /// <summary>The key chords are read at all.</summary>
+    public bool KeybindsEnabled { get; set; } = true;
+
+    /// <summary>The modifier the defaults were built on (Settings → Keybinds → preset).</summary>
+    public ModifierPreset ModifierPreset { get; set; } = ModifierPreset.Super;
+
+    /// <summary>Action → chord text ("Super+D"). Empty on first load; filled from the preset.</summary>
+    public Dictionary<string, string> Keybinds { get; set; } = [];
+
+    /// <summary>
+    /// Read every key with GetAsyncKeyState instead of the game's key state, so chords also work while a
+    /// window panel has the keyboard. Off by default: the game's key state is the normal Dalamud way.
+    /// </summary>
+    public bool ReadKeysGlobally { get; set; }
+
+    /// <summary>What Super+Enter posts to ghostty-dalamud (a /term line without "/term").</summary>
+    public string TerminalLine { get; set; } = "new";
+
+    /// <summary>/term pin arguments for turning a pet into a pin (Super+Space on a pet).</summary>
+    public string PinArgs { get; set; } = "here";
+
+    /// <summary>/term pin arguments for Super+Shift+Space.</summary>
+    public string PinFrontArgs { get; set; } = "here";
+
+    public bool NotifyOpened { get; set; } = true;
+
+    public bool NotifyEnded { get; set; } = true;
+
+    /// <summary>Hide other workspaces' panels (window.place "hide"). Off: workspaces only group.</summary>
+    public bool WorkspacesHide { get; set; } = true;
+
+    public int CurrentWorkspace { get; set; } = 1;
+
+    public List<WorkspaceEntry> Workspaces { get; set; } = [];
+
+    /// <summary>The palette closes when it loses keyboard focus (Walker/Raycast style).</summary>
+    public bool PaletteCloseOnFocusLoss { get; set; } = true;
+
     public static Configuration Load(IDalamudPluginInterface pi)
     {
         Configuration config;
@@ -46,6 +88,14 @@ public sealed class Configuration : IPluginConfiguration
         config.Recents ??= [];
         config.HomeOverride ??= "";
         config.IconSize = Math.Clamp(config.IconSize, 24, 128);
+        config.Keybinds ??= [];
+        if (config.Keybinds.Count == 0)
+            config.Keybinds = Core.Input.Keybinds.Defaults(config.ModifierPreset);
+        config.TerminalLine = string.IsNullOrWhiteSpace(config.TerminalLine) ? "new" : config.TerminalLine;
+        config.PinArgs = string.IsNullOrWhiteSpace(config.PinArgs) ? "here" : config.PinArgs;
+        config.PinFrontArgs = string.IsNullOrWhiteSpace(config.PinFrontArgs) ? "here" : config.PinFrontArgs;
+        config.Workspaces ??= [];
+        config.CurrentWorkspace = Math.Clamp(config.CurrentWorkspace, 1, WorkspaceModel.Count);
         config.Version = CurrentVersion;
         return config;
     }
