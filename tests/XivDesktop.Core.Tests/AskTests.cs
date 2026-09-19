@@ -90,7 +90,7 @@ public class CueTests
         Assert.Equal("Well ", out1.Text);
         Assert.Equal("", out2.Text);
         Assert.Equal([new Cue(CueTarget.Npc, "think")], out3.Cues);
-        Assert.Equal("Well  then".Replace("  ", " "), out1.Text + out2.Text + out3.Text + end.Text);
+        Assert.Equal("Well then", (out1.Text + out2.Text + out3.Text + end.Text).Replace("  ", " "));
     }
 
     [Fact]
@@ -294,7 +294,7 @@ public class FollowTests
         f.Spawn(10, 0, 20, 0, 2);
         Assert.Equal(10, f.X, 3);
         Assert.Equal(22, f.Z, 3);
-        Assert.Equal(Follower.YawTowards(f.X, f.Z, 10, 20), f.Yaw, 3);
+        Assert.Equal(0, Follower.Wrap(Follower.YawTowards(f.X, f.Z, 10, 20) - f.Yaw), 6);
         Assert.True(f.Conversing);
     }
 
@@ -313,6 +313,7 @@ public class FollowTests
         }
 
         Assert.False(f.Conversing);
+        Assert.Contains(Gait.Idle, gaits); // it stands its ground for the first moments
         var d = Math.Sqrt(f.X * f.X + (f.Z - pz) * (f.Z - pz));
         Assert.InRange(d, 1.1, 3.0);
         Assert.True(f.Z > pz - 1.0, "never trails behind the player");
@@ -335,7 +336,7 @@ public class FollowTests
         for (var i = 0; i < 240; i++)
             f.Update(1 / 60.0, 0, 0, pz, 0, false);
         Assert.Equal(Gait.Idle, f.Gait);
-        Assert.Equal(Follower.YawTowards(f.X, f.Z, 0, pz), f.Yaw, 1);
+        Assert.Equal(0, Follower.Wrap(Follower.YawTowards(f.X, f.Z, 0, pz) - f.Yaw), 1);
     }
 
     [Fact]

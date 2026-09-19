@@ -127,7 +127,9 @@ public sealed class Follower
         lastPz = pz;
         var moving = playerSpeed > Tuning.MovingSpeed;
         var dist = Math.Sqrt(Sq(X - px) + Sq(Z - pz));
-        if (Conversing && (dist > Tuning.LeaveConversation || (moving && !talking && dist > Tuning.Distance + 0.6)))
+        // Walking off (or simply getting far enough away) ends the standing conversation and starts the
+        // follow; otherwise the player would push the speaker along, since it only holds its ground.
+        if (Conversing && (moving || dist > Tuning.LeaveConversation))
             Conversing = false;
 
         double tx, tz;

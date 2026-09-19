@@ -35,7 +35,7 @@ public sealed class SpeakerSheets
     public bool Scanning => scan is { IsCompleted: false };
 
     /// <summary>Raised on the framework thread when <see cref="Catalog"/> changed.</summary>
-    public event Action? Changed;
+    public event System.Action? Changed;
 
     /// <summary>
     /// Refreshes unlocks now (framework thread) and starts the NPC scan if it has not run yet. Safe to call

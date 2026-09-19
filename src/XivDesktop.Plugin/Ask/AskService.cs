@@ -118,7 +118,7 @@ public sealed unsafe class AskService : IDisposable
     }
 
     /// <summary>"scholar how do…" / "npc:123 hello" / "Alphinaud hello" (a favourite by name) → (key, rest).</summary>
-    private (string? Key, string Rest) SplitSpeaker(string text)
+    private (string? Key, string Question) SplitSpeaker(string text)
     {
         var space = text.IndexOf(' ');
         var first = space < 0 ? text : text[..space];
