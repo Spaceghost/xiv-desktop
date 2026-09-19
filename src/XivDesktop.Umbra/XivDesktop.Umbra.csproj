@@ -42,6 +42,7 @@
     <Compile Include="..\Shared\IpcContract.cs" Link="Shared\IpcContract.cs" />
     <Compile Include="..\XivDesktop.Core\DesktopEntry.cs" Link="Core\DesktopEntry.cs" />
     <Compile Include="..\XivDesktop.Core\AppSearch.cs" Link="Core\AppSearch.cs" />
+    <Compile Include="..\XivDesktop.Core\LetterTile.cs" Link="Core\LetterTile.cs" />
   </ItemGroup>
 
   <ItemGroup>
