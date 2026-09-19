@@ -78,6 +78,52 @@ public sealed class Configuration : IPluginConfiguration
     /// <summary>The palette closes when it loses keyboard focus (Walker/Raycast style).</summary>
     public bool PaletteCloseOnFocusLoss { get; set; } = true;
 
+    // Ask an NPC ---------------------------------------------------------------------------------
+
+    /// <summary>
+    /// Also answer "/ask" with the NPC conversation. Off by default: ghostty-dalamud owns /ask (its chat
+    /// panel), and Dalamud gives a command to whoever registered it first, so this only takes effect when
+    /// no other plugin holds /ask. "/npc" always works.
+    /// </summary>
+    public bool AskRouteSlashAsk { get; set; }
+
+    /// <summary>Summon a local character to talk to (off: the dialogue alone).</summary>
+    public bool AskSpawnNpc { get; set; } = true;
+
+    /// <summary>The speaker: "npc:&lt;ENpcResident id&gt;", "minion:&lt;id&gt;", "mount:&lt;id&gt;", "pet:&lt;id&gt;" or "self".</summary>
+    public string AskSpeaker { get; set; } = "";
+
+    public List<string> AskFavourites { get; set; } = [];
+
+    public List<string> AskRecents { get; set; } = [];
+
+    /// <summary>Where questions go: the in-world dialogue over almanac's gateway, or ghostty's terminal "/term ask".</summary>
+    public AskBackendKind AskBackend { get; set; } = AskBackendKind.Gateway;
+
+    /// <summary>almanac gateway base URL (the plugin runs under Wine; loopback reaches the host).</summary>
+    public string AskGateway { get; set; } = "";
+
+    /// <summary>Model name sent to the gateway ("local" maps to its default model).</summary>
+    public string AskModel { get; set; } = "local";
+
+    /// <summary>Text speed, 1 (slow) … 5 (instant).</summary>
+    public int AskReadingSpeed { get; set; } = 3;
+
+    /// <summary>The summoned character follows the player like a pet.</summary>
+    public bool AskFollow { get; set; } = true;
+
+    /// <summary>Emote cues (the model's tags, else a keyword guess) play on the speaker and on your character.</summary>
+    public bool AskEmotes { get; set; } = true;
+
+    /// <summary>Your character turns toward the speaker and gestures when you ask.</summary>
+    public bool AskPlayerGestures { get; set; } = true;
+
+    /// <summary>Label for the "Myself" speaker's lines: "You (advising)".</summary>
+    public string AskSelfTitle { get; set; } = "advising";
+
+    /// <summary>Pet name → ModelChara row, learned from your own summoned pets (the sheets do not link them).</summary>
+    public Dictionary<string, int> AskPetModels { get; set; } = [];
+
     public static Configuration Load(IDalamudPluginInterface pi)
     {
         Configuration config;
@@ -104,7 +150,24 @@ public sealed class Configuration : IPluginConfiguration
         config.TerminalProfile ??= "";
         config.TerminalPin = string.IsNullOrWhiteSpace(config.TerminalPin) ? "pet" : config.TerminalPin;
         config.CurrentWorkspace = Math.Clamp(config.CurrentWorkspace, 1, WorkspaceModel.Count);
+        config.AskSpeaker ??= "";
+        config.AskFavourites ??= [];
+        config.AskRecents ??= [];
+        config.AskGateway ??= "";
+        config.AskModel = string.IsNullOrWhiteSpace(config.AskModel) ? "local" : config.AskModel;
+        config.AskReadingSpeed = Math.Clamp(config.AskReadingSpeed, 1, 5);
+        config.AskSelfTitle ??= "advising";
+        config.AskPetModels ??= [];
         config.Version = CurrentVersion;
         return config;
     }
+}
+
+public enum AskBackendKind
+{
+    /// <summary>almanac's model gateway (streamed, multi-turn), in the in-game dialogue.</summary>
+    Gateway,
+
+    /// <summary>ghostty-dalamud's terminal: posts "/term ask …" (one shot, terminal look).</summary>
+    Terminal,
 }

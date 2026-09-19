@@ -7,7 +7,7 @@
 
 | Project | Output | Depends on | Role |
 | --- | --- | --- | --- |
-| `src/XivDesktop.Core` | `XivDesktop.Core.dll` (net10.0) | BCL only | `.desktop` parsing, Exec → sh, visibility rules, icon lookup, search, favourites/recents, launch validation; v1: `Windows/` (ghostty Call JSON, window diff, window → app), `Input/` (chords, defaults, edge tracker), `Workspaces/`, `Palette/` (fuzzy, calculator, providers). Pure and host-tested. |
+| `src/XivDesktop.Core` | `XivDesktop.Core.dll` (net10.0) | BCL only | `Ask/` (SSE parsing, transcript, cue tags, emote whitelist, text reveal, follow math, speaker catalog); `.desktop` parsing, Exec → sh, visibility rules, icon lookup, search, favourites/recents, launch validation; v1: `Windows/` (ghostty Call JSON, window diff, window → app), `Input/` (chords, defaults, edge tracker), `Workspaces/`, `Palette/` (fuzzy, calculator, providers). Pure and host-tested. |
 | `src/XivDesktop.Plugin` | `XivDesktop.dll` (Dalamud.NET.Sdk 15) | Core, Dalamud API 15 | Catalog, ghostty backends, session (workspaces, notifications), key chords, palette, app grid, settings, IPC provider. |
 | `src/XivDesktop.Umbra` | `Umbra.XivDesktop.dll` | Umbra, IPC contract, three Core source files | "Apps" and "Windows" toolbar widgets. Talk to the plugin only over IPC. |
 | `src/Shared/IpcContract.cs` | compiled into Plugin, Umbra and tests | — | Gate names and JSON payload shapes. Additive changes only. |
@@ -28,8 +28,13 @@ Plugin (IDalamudPlugin)
  ├─ CommandRunner          runs palette rows and key actions
  ├─ PaletteWindow          Super+D / /desktop; PaletteEngine over a PaletteContext snapshot
  ├─ LauncherWindow         /desktop apps: the v0 icon grid
- ├─ SettingsWindow         General, Keybinds, Windows
- └─ DesktopIpc             XivDesktop.v1.* gates; every handler catches its own exceptions
+ ├─ SettingsWindow         General, Keybinds, Windows, Ask
+ ├─ DesktopIpc             XivDesktop.v1.* gates; every handler catches its own exceptions
+ └─ AskModule              /ask, XivDesktop.v1.Ask (docs/ASK.md)
+     ├─ AskBackend            almanac gateway, SSE on the thread pool, client-side transcript
+     ├─ SpeakerSheets         NPC/minion/mount/pet catalog (sheet scan off the framework thread)
+     ├─ AskService            conversation, cues, LocalActor (client-side character) + Follower
+     └─ TalkAddon / SpeakerPickerAddon   KamiToolKit native addons (ImGuiTalkWindow fallback)
 ```
 
 **Paths.** Core works in Linux paths and maps them through `HostPaths.ToLocal`. That is the identity on the

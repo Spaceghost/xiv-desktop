@@ -3,6 +3,7 @@ using Dalamud.Interface.ImGuiNotification;
 using Dalamud.Interface.Windowing;
 using Dalamud.Plugin;
 using Dalamud.Plugin.Services;
+using XivDesktop.Plugin.Ask;
 using XivDesktop.Plugin.Ipc;
 using XivDesktop.Plugin.Services;
 using XivDesktop.Plugin.Windows;
@@ -31,6 +32,7 @@ public sealed class Plugin : IDalamudPlugin
     private readonly PaletteWindow palette = null!;
     private readonly SettingsWindow settings = null!;
     private readonly INotificationManager notifications;
+    private readonly AskModule? ask;
     private bool commandRegistered;
 
     public Plugin(
@@ -41,7 +43,11 @@ public sealed class Plugin : IDalamudPlugin
         IChatGui chat,
         ITextureProvider textures,
         IKeyState keys,
-        INotificationManager notifications)
+        INotificationManager notifications,
+        IDataManager data,
+        IClientState clientState,
+        ICondition condition,
+        IObjectTable objects)
     {
         this.notifications = notifications;
         this.pluginInterface = pluginInterface;
@@ -78,6 +84,11 @@ public sealed class Plugin : IDalamudPlugin
             {
                 HelpMessage = "Toggle the launcher palette. \"/desktop apps\" (app grid), \"/desktop settings\", \"/desktop ws <1-9>\", \"/desktop windows\", \"/desktop launch <app>\", \"/desktop reload\", \"/desktop status\", \"/desktop <query>\".",
             });
+
+            // Ask an NPC: /ask, XivDesktop.v1.Ask, the summoned speaker and its dialogue (Ask/).
+            ask = Track(new AskModule(pluginInterface, framework, commands, chat, log, data, clientState, condition, objects, textures,
+                windowSystem, config, () => ghostty.Post.Available, line => ghostty.Post.Post(line)));
+            settings.AskTab = new AskSettings(ask, config, () => pluginInterface.SavePluginConfig(config)).Draw;
 
             Track(new DesktopIpc(pluginInterface, framework, log, desktop, session, runner, text => palette.Toggle(text)));
 
@@ -172,6 +183,9 @@ public sealed class Plugin : IDalamudPlugin
                     break;
                 case "status":
                     Print(desktop.Status().Summary);
+                    break;
+                case "ask":
+                    ask?.Run(rest);
                     break;
                 case "help":
                     Print($"{Command} toggles the launcher palette; {Command} apps (app grid); {Command} settings; {Command} ws <1-9>; {Command} windows; {Command} launch <app>; {Command} reload; {Command} status; {Command} <text> opens the palette with a query.");
