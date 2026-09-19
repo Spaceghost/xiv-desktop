@@ -56,6 +56,12 @@ public interface IWindowManager
 
     string FocusCycle(int dir);
 
+    /// <summary>panel.list, when ghostty-dalamud has it; null on an older build (use <see cref="Snapshot"/>).</summary>
+    PanelListSnapshot? PanelSnapshot { get; }
+
+    /// <summary>A panel.* change: focus, close, minimize, toggle_pet, place (arg: pin), order (arg: to).</summary>
+    string PanelChange(string method, long id, string arg = "");
+
     /// <summary>Asks the agent for its window and app lists again.</summary>
     string RefreshAgentLists();
 }
