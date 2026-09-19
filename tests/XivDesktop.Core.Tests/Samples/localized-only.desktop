@@ -1,0 +1,7 @@
+[Desktop Entry]
+Type=Application
+Name[fr]=Calculatrice
+Name[en_GB]=Calculator
+Comment[en_GB]=Sums
+Keywords[en_GB]=math;sum;
+Exec=calc

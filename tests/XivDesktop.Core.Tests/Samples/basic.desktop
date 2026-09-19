@@ -1,0 +1,16 @@
+# A comment
+[Desktop Entry]
+Type=Application
+Name=Text Editor
+Name[de]=Texteditor
+GenericName=Text Editor
+Comment=View and edit text files
+Keywords=Text;Plaintext;Write;
+Categories=GNOME;GTK;Utility;TextEditor;
+Exec=gnome-text-editor %U
+Icon=org.gnome.TextEditor
+Terminal=false
+
+[Desktop Action new-window]
+Name=New Window
+Exec=gnome-text-editor --new-window

@@ -1,0 +1,13 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/XivDesktop.Core/XivDesktop.Core.csproj" />
+    <Project Path="src/XivDesktop.Plugin/XivDesktop.Plugin.csproj" />
+    <Project Path="src/XivDesktop.Umbra/XivDesktop.Umbra.csproj" />
+  </Folder>
+  <Folder Name="/tools/">
+    <Project Path="tools/scan/XivDesktop.Scan.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/XivDesktop.Core.Tests/XivDesktop.Core.Tests.csproj" />
+  </Folder>
+</Solution>

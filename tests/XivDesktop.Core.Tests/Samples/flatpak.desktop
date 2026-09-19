@@ -1,0 +1,5 @@
+[Desktop Entry]
+Type=Application
+Name=Logseq
+Exec=/usr/bin/flatpak run --branch=stable --arch=x86_64 --command=run.sh --file-forwarding com.logseq.Logseq @@u %U @@
+Icon=com.logseq.Logseq
