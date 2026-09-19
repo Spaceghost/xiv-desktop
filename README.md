@@ -5,25 +5,31 @@ XIV and opens them as windows in the game world. It does not draw or stream any 
 top of ghostty-dalamud: that plugin's `ghostty-agent` runs a
 headless Wayland compositor on the host and shows its windows as world panels. XivDesktop adds the parts a
 desktop has and a terminal command does not: an app catalog with icons, search, favourites and recents, a
-`/desktop` launcher, IPC for other plugins, and an optional Umbra toolbar button.
+keyboard-first launcher palette (Super+D), sway-style key chords, nine workspaces of window panels, open/close
+notifications, IPC for other plugins and MCP, and two optional Umbra toolbar widgets ("Apps" and a "Windows"
+taskbar).
 
-> **Status (v0).** The solution builds against Dalamud API 15 (.NET 10). The catalog library has host-side
-> tests, and the scanner has been run against a real Bazzite host's application directories (Linux paths,
-> not through Wine). **Nothing has been observed in the game yet.** The launcher window, the icon textures,
-> the IPC gates, the Umbra widget, and whether `Z:\` reads behave under Wine as they do on the host are all
-> unverified until someone loads the plugin. Treat everything below about in-game behaviour as the design,
-> not as a result.
+> **Status (v1).** The solution builds against Dalamud API 15 (.NET 10). The pure logic (catalog, palette
+> ranking, calculator, key chords, workspaces, ghostty's `window.list` JSON) has host-side tests, and the
+> scanner has been run against a real Bazzite host's application directories (Linux paths, not through
+> Wine). **Nothing has been observed in the game yet**, v0 or v1: not the palette, the key chords (including
+> whether the game or Wine reports the Windows keys at all), the Call backend against a running
+> ghostty-dalamud, workspace hiding, notifications, the IPC gates, or either Umbra widget. Treat everything
+> below about in-game behaviour as the design, not as a result.
 
 ## How it fits together
 
 ```
-/desktop window ─┐
-Umbra "Apps" ────┼─ XivDesktop.v1.* IPC ─> XivDesktop plugin (in game, under Wine)
-other plugins ───┘                           ├─ catalog: reads Z:\usr\share\applications ... off the framework thread
+Super+D palette ─┐
+key chords ──────┤
+Umbra widgets ───┼─ XivDesktop.v1.* IPC ─> XivDesktop plugin (in game, under Wine)
+xiv-mcp, plugins ┘                           ├─ catalog: reads Z:\usr\share\applications ... off the framework thread
                                              ├─ icons: Z:\...\hicolor\256x256\apps\*.png -> ITextureProvider
-                                             └─ launch: GhosttyDalamud.v1.Post("window pull run <cmd>")
+                                             ├─ windows: GhosttyDalamud.v1.Call window.list (polled ≤ 4×/s, by rev)
+                                             └─ launch/close/focus/place: GhosttyDalamud.v1.Call window.*
+                                                (fallback: GhosttyDalamud.v1.Post "window pull run <cmd>")
                                                           │
-ghostty-dalamud (in game) ── /term window pull run ───────┘
+ghostty-dalamud (in game) ── world panels: pets and pins ─┘
         │
 ghostty-agent (Linux host) ── sh -c <cmd> inside its compositor (socket ffxiv-0) ──> window shown as a pet
 ```
@@ -64,29 +70,130 @@ edits Dalamud's configuration and never copies anything into `~/.xlcore`.
 
 | Command | What it does |
 | --- | --- |
-| `/desktop` | toggle the launcher window |
-| `/desktop <text>` | open it with a search already typed |
+| `/desktop` | toggle the launcher palette (also Super+D) |
+| `/desktop <text>` | open the palette with a query already typed |
+| `/desktop apps [search]` | the v0 app grid with icons, favourites and recents |
+| `/desktop settings` | settings: general, keybinds, windows and workspaces |
+| `/desktop ws <1-9>` | switch workspace |
+| `/desktop windows` | list the window panels in chat |
 | `/desktop launch <id or search>` | launch an app by desktop-file id (`org.gnome.TextEditor`), exact name, or best search match |
 | `/desktop reload` | rescan the application directories (runs off the framework thread) |
 | `/desktop status` | one line: app count, and whether ghostty-dalamud is there |
 
-The launcher has a search box (focused when the window opens), the favourites and recent rows (shown while
-the search is empty), and an icon grid. **Up/Down** move by row. **Left/Right** move by one while the search
+The app grid (`/desktop apps`, or *App grid* in the palette) has a search box (focused when the window
+opens), the favourites and recent rows (shown while the search is empty), and an icon grid. **Up/Down** move by row. **Left/Right** move by one while the search
 box is empty or unfocused. **Enter** launches the selection. Clicking a cell launches it. Right-click gives
 *Add to favourites*, *Launch* and *Copy command*. The window closes after a launch. Favourites and recents
 are stored in `pluginConfigs/XivDesktop.json`.
 
-A launch posts `window pull run <command>` to ghostty-dalamud, the same as typing
-`/term window pull run <command>`. The new window appears as a pet beside the character.
+With ghostty-dalamud's `GhosttyDalamud.v1.Call` gate a launch is `window.open {"run": <command>}`, and the
+new panel's id comes back, so its icon and notifications are known for sure. Without it, a launch posts
+`window pull run <command>`, the same as typing `/term window pull run <command>`. Either way the new window
+appears as a pet beside the character.
 
-## Umbra widget
+## Launcher palette (Super+D)
 
-`tools/install-umbra.sh` builds `Umbra.XivDesktop.dll`. With `--install` it also copies it to
+A centred, keyboard-first palette in the style of Walker, Vicinae or Raycast: one query box, and ranked
+rows from several providers. Each row has an icon, a title (matched characters highlighted and underlined),
+a subtitle and a provider badge.
+
+| Provider | Rows | Enter does |
+| --- | --- | --- |
+| **App** | the catalog; favourites and recents rank higher and fill the empty query | launch |
+| **Window** | open window panels from `window.list`, with app, pet/pin and workspace | focus (switches to its workspace first) |
+| **Action** | close window, pin here, make pet, workspace N, move to workspace N, reload apps, app grid | run it on the target panel |
+| **Calc** | arithmetic (`2+2`, `sqrt 2`, `2^10 % 7`, `max(3, 9)`, `2*pi`) | copy the result to the clipboard |
+| **Command** | `/term`, `/term new`, `/term pin pet`, `/window pull`, `ask <question>`, any `/command` | post it to ghostty-dalamud, or run the command |
+
+Prefixes narrow it to one provider: `a:` apps, `w:` windows, `=` calculator, `>` commands and actions.
+Without a prefix, arithmetic shows a Calc row at the top and actions appear once something is typed.
+Matching is fuzzy (a subsequence; contiguous runs and word starts score higher), apps keep v0's
+name/keyword/generic-name scoring.
+
+**Keys:** Up/Down, Ctrl+J/K (or Ctrl+N/P, Tab/Shift+Tab) select, PageUp/PageDown jump, Enter runs, Esc
+closes. The palette opens centred in the upper part of the screen, or in the other half when the mouse
+would be over it, and takes keyboard focus. It closes when it loses focus (Settings → General). Its style
+(rounded, translucent, one violet accent) is pushed only around this window.
+
+The **target panel** for actions is the panel ghostty reports as focused, else the last one focused
+through XivDesktop, else the newest one on the current workspace.
+
+The calculator is a small recursive-descent parser written for this: numbers, `+ - * / % ^ **`,
+parentheses, unary minus, `pi e tau`, and `sqrt abs round floor ceil sin cos tan asin acos atan ln log
+log2 exp min max`. Nothing else is evaluated; input is capped at 256 characters and 32 levels of nesting.
+
+## Key chords
+
+All configurable in Settings → **Keybinds** (type a chord such as `Super+Shift+3`; empty unbinds).
+
+| Default | Action |
+| --- | --- |
+| Super+D | toggle the launcher palette |
+| Super+Enter | open a terminal: posts the Settings → General *terminal line* to ghostty (`new`: a dropdown tab) |
+| Super+Q | close the target window panel |
+| Super+Space | target panel: pet → pinned (`here`), pinned → pet |
+| Super+Shift+Space | pin the target panel in front of you (`here`) |
+| Super+Left / Super+Right | focus the previous / next window panel on this workspace |
+| Super+1 … Super+9 | switch workspace |
+| Super+Shift+1 … Super+Shift+9 | move the target panel to that workspace |
+
+- Chords match exactly (Super+1 does not fire on Super+Shift+1), fire once per press, and never while an
+  ImGui text field has the keyboard. A consumed key is cleared in Dalamud's `IKeyState` so the game does
+  not also act on it.
+- Keys are read from the game's key state (`IKeyState`), the usual Dalamud way. Keys the game does not
+  track, which may include VK_LWIN/VK_RWIN, are read with `GetAsyncKeyState`, only while the game window is
+  in the foreground. *Read keys globally* uses `GetAsyncKeyState` for every key, so chords also work while a
+  window panel has the keyboard. Whether Wine delivers the Windows keys at all is **unverified**.
+- **Super under a Linux desktop.** The desktop can take Super before Wine sees it: sway binds `$mod+d`
+  itself, and GNOME opens the overview on Super. Either unbind those for the game's window, or pick another
+  modifier in Settings → Keybinds → *Modifier* and **Reset all to this modifier**: *Alt+Shift* (Shift
+  variants become Ctrl+Alt+Shift) or *Ctrl+Alt* (Shift variants become Ctrl+Alt+Shift). The game itself
+  binds some Alt and Ctrl chords; check the game's keybind settings for clashes.
+- `Super+Space` turns a pet into a pin with `/term pin here`, which pins it 2.5 yalms in front of you:
+  ghostty has no "pin it where it is now". Both pin arguments are editable (`me`, `target`, `orbit 3.5`, …).
+- `Super+Enter` with *terminal line* `pin pet` opens a new world terminal that follows you, but ghostty
+  pins the active dropdown tab, or a focused window panel, instead when there is one; `new` (the default)
+  always opens a tab.
+
+## Workspaces
+
+Nine numbered workspaces, sway style. Every window panel belongs to one; a new panel joins the current
+workspace. Switching hides the other workspaces' panels with `window.place {"pin": "hide"}` and shows the
+current ones with `"hide off"` (ghostty's `/term pin hide`, which keeps the panel and its size but stops
+drawing it). Focusing a panel on another workspace (palette, taskbar) switches there first.
+
+Membership is saved in `pluginConfigs/XivDesktop.json` by panel id, title and app. Panel ids do not survive
+a ghostty reload or an agent reconnect, so a panel that comes back is re-bound best-effort: same title,
+else same app with the same "… - App" title stem. Turning off *Hide other workspaces' panels* keeps the
+grouping (palette, taskbar) and shows everything.
+
+Limits (ghostty's side): `window.list` does not report whether a panel is hidden, so XivDesktop tracks what
+it hid itself; re-placing a panel (pet/pin) shows it again, which XivDesktop accounts for; a panel hidden by
+something else is not known. Full-screen and tab views cannot be hidden.
+
+## Notifications
+
+When a window panel becomes live, or ends, XivDesktop shows a Dalamud notification with the app's icon
+(PNG from the catalog; a glyph when unknown). Both are toggles in Settings → General. A `window.open` that
+ghostty refuses (agent not connected, too old, no player) always shows a warning.
+
+## Umbra widgets
+
+`tools/install-umbra.sh` builds `Umbra.XivDesktop.dll`, which holds both widgets. With `--install` it also copies it to
 `~/umbra-plugins/`. In Umbra Settings → **Plugins**, accept the third-party plugin warning, **Install from
 file** → pick the DLL's `Z:\` path, restart Umbra, then add the **Apps** toolbar widget. Clicking the button
 opens a compact launcher: search, favourites and recents. Right-click an app to toggle it as a favourite.
-Right-click the widget itself to open the full `/desktop` window. The widget uses only the IPC below.
-**It has not been loaded in Umbra yet**, so its layout and the embedded search box are unverified.
+Right-click the widget itself to open the launcher palette. The widget uses only the IPC below.
+
+The **Windows** widget is a taskbar: the current workspace number, then a strip of the open window panels
+(a letter tile and the title; the focused one outlined). Click a panel to focus it, middle-click to close it,
+right-click for *Pin here / Make pet*, *Pin in front*, *Move to workspace N* and *Close*. Clicking the
+workspace number lists every panel and workspace. Its settings: title length, and whether panels on other
+workspaces are listed (dimmed). Umbra's `MenuPopup` is sealed and a widget cannot raise Umbra's open-popup
+event itself, so the right-click menu is opened through that event's backing field by reflection.
+
+**Neither widget has been loaded in Umbra yet**: their layout, the stylesheet, the embedded search box and
+the reflection above are unverified.
 
 ## What gets listed
 
@@ -142,19 +249,97 @@ shapes are in [src/Shared/IpcContract.cs](src/Shared/IpcContract.cs).
 | `XivDesktop.v1.Status` | `Func<string>` | `{ ghostty, ghosttyStatus, apps, scanning, scannedAt, lastLaunch, lastError, summary }` |
 | `XivDesktop.v1.ToggleLauncher` | `Action<string>` | toggles the window; the argument pre-fills the search |
 | `XivDesktop.v1.ToggleFavourite` | `Func<string, bool>` | new favourite state |
+| `XivDesktop.v1.Windows` | `Func<string>` | window panels with workspaces, see below |
+| `XivDesktop.v1.Workspace` | `Func<int, string>` | `1..9` switches; `0` only reports; `"ok: workspace N"` or `"error: REASON"` |
+| `XivDesktop.v1.Palette` | `Func<string, string>` | the palette's top 10 rows for a query, see below |
+| `XivDesktop.v1.WindowAction` | `Func<string, string>` | `"ok: …"` or `"error: …"`; takes the JSON below |
 
-`ok` from `Launch` means the command was handed to ghostty-dalamud, not that a window appeared.
+`ok` from `Launch` means the command was handed to ghostty-dalamud, not that a window appeared. `ok` from
+`WindowAction` and `Workspace` means ghostty queued the change; the outcome shows in the next `Windows`.
+`Windows` is rebuilt on the framework thread after every change and is free to read from any thread;
+`Workspace`, `Palette` and `WindowAction` run on the framework thread (inline when called from it) and give
+up after two seconds.
+
+These are the gates meant for xiv-mcp's tools (`list_windows`, `switch_workspace`, `palette_search`,
+`window_action`); none exist there yet.
+
+`XivDesktop.v1.Windows`:
+
+```json
+{
+  "available": true,
+  "rev": 7,
+  "workspace": 1,
+  "target": 12,
+  "windows": [
+    {"id": 12, "title": "Yad Window", "app": "yad", "state": "live", "kind": "pet",
+     "focused": false, "workspace": 1, "hidden": false, "appId": "yad-calendar.desktop"}
+  ]
+}
+```
+
+`available`: ghostty-dalamud's Call gate is registered (else `windows` is empty). `rev`: ghostty's
+`window.list` rev, `-1` before the first answer. `target`: the panel actions without an id apply to.
+`state`, `kind`: as ghostty reports them (`pending|live|ended`, `pet|pin|full|tab`). `workspace`: `1..9`,
+`0` while not yet assigned. `hidden`: XivDesktop hid it. `appId`: best-guess desktop-file id, or `null`.
+
+`XivDesktop.v1.Palette("fire")` (scores illustrative):
+
+```json
+[
+  {"provider": "app", "title": "Firefox", "subtitle": "Web Browser", "score": 168.4, "enabled": true,
+   "reason": null, "command": {"kind": "launch", "arg": "org.mozilla.firefox.desktop", "id": 0, "number": 0},
+   "appId": "org.mozilla.firefox.desktop", "windowId": null},
+  {"provider": "window", "title": "Mozilla Firefox", "subtitle": "firefox · pet · workspace 1",
+   "score": 131.5, "enabled": true, "reason": null,
+   "command": {"kind": "focus", "arg": "", "id": 12, "number": 0}, "appId": null, "windowId": 12}
+]
+```
+
+`provider`: `app|window|action|calc|command`. `command.kind`: `launch` (arg: app id), `focus`, `close`,
+`place` (arg: pin arguments), `workspace` (number), `move` (id, number), `reload`, `copy` (arg: text),
+`post` (arg: a `/term` line), `chat` (arg: a slash command), `grid`. The prefixes (`a:`, `w:`, `=`, `>`)
+work here too. Palette only ranks; to act, use `Launch`, `WindowAction` or `Workspace`.
+
+`XivDesktop.v1.WindowAction` takes:
+
+```json
+{"action": "focus|close|pet|pin|place|move", "id": 12, "pin": "orbit 3.5", "workspace": 3}
+```
+
+`id` 0 or missing means the target panel. `pin` is only for `place` (as `/term pin` takes it); `pin` is
+`place` with `here`; `workspace` is only for `move`.
 
 ## Development
 
 ```sh
 ~/.dotnet/dotnet build            # everything; outputs go to ~/xiv-desktop-build/artifacts
-~/.dotnet/dotnet test             # host tests (parser, Exec, overrides, visibility, icons, search, IPC payloads)
+~/.dotnet/dotnet test             # host tests: catalog, search, IPC payloads, palette, calculator, chords,
+                                  # workspaces, ghostty window.list parsing (182 tests)
 ```
 
 Tests build throwaway directory trees for icon and override cases. They never touch Dalamud or the game.
 
 ## Not implemented yet
 
-Taskbar of open windows, notifications, clipboard, file drops, saved layouts, MCP tools, window placement
-per zone. See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md#later) for what each needs from ghostty-dalamud.
+Clipboard, file drops, saved layouts, MCP tools in xiv-mcp (the gates above are ready for them), window
+placement per zone, app icons in the Umbra taskbar (letter tiles for now), recording a chord by pressing it.
+See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md#later) for what each needs from ghostty-dalamud.
+
+## Desktop integrations (planned)
+
+The direction is a game session that is also the desktop session: sway today, GNOME later. **None of this
+is implemented.**
+
+- **GNOME:** a GNOME Shell extension that talks to XivDesktop through ghostty-agent (not through Wine):
+  - *Send to game*: a window-menu entry and a keybind that hands a running app to the game, i.e.
+    `window.open {"match": …}` on its window. Moving an already-mapped GNOME window into the agent's
+    compositor is not possible as such; the realistic route is ghostty-agent capturing it through the
+    desktop portal (screencast) the way it captures on Windows.
+  - *Notifications mirroring*: freedesktop notifications on the host shown as Dalamud notifications, and
+    the other way round for in-game events.
+  - *Clipboard*: host clipboard ↔ Wine clipboard, through the agent.
+  - *GSConnect-like*: a phone-style bridge (notifications, clipboard, "open on the other side") between the
+    Linux desktop and the game session.
+- **KDE Plasma / SteamOS:** later; the same agent-side pieces with a KWin script instead of a Shell
+  extension. Not planned for now.
