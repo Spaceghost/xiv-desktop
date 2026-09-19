@@ -31,6 +31,11 @@ public sealed class XivDesktopClient : IDisposable
     private readonly ICallGateSubscriber<string>? _status;
     private readonly ICallGateSubscriber<string, object>? _toggleLauncher;
     private readonly ICallGateSubscriber<string, bool>? _toggleFavourite;
+    private readonly ICallGateSubscriber<string>? _windows;
+    private readonly ICallGateSubscriber<string, string>? _windowAction;
+    private readonly ICallGateSubscriber<int, string>? _workspace;
+    private const long WindowsIntervalMs = 500;
+    private long _lastWindowsMs = long.MinValue / 2;
 
     private long _lastStatusMs = long.MinValue / 2;
     private long _lastAppsMs = long.MinValue / 2;
@@ -48,6 +53,9 @@ public sealed class XivDesktopClient : IDisposable
             _status = pi.GetIpcSubscriber<string>(IpcContract.Status);
             _toggleLauncher = pi.GetIpcSubscriber<string, object>(IpcContract.ToggleLauncher);
             _toggleFavourite = pi.GetIpcSubscriber<string, bool>(IpcContract.ToggleFavourite);
+            _windows = pi.GetIpcSubscriber<string>(IpcContract.Windows);
+            _windowAction = pi.GetIpcSubscriber<string, string>(IpcContract.WindowAction);
+            _workspace = pi.GetIpcSubscriber<int, string>(IpcContract.Workspace);
         }
         catch (Exception ex)
         {
@@ -64,6 +72,9 @@ public sealed class XivDesktopClient : IDisposable
 
     public IReadOnlyList<AppSummary> Summaries { get; private set; } = [];
 
+    /// <summary>Window panels and workspaces (null until XivDesktop answers; Available false without ghostty's Call gate).</summary>
+    public WindowsPayload? Windows { get; private set; }
+
     /// <summary>Fetch the app list on the next tick (popups call this when they open).</summary>
     public void Invalidate() => Interlocked.Exchange(ref _appsDirty, 1);
 
@@ -78,6 +89,12 @@ public sealed class XivDesktopClient : IDisposable
             {
                 _lastStatusMs = now;
                 RefreshStatus();
+            }
+
+            if (now - _lastWindowsMs >= WindowsIntervalMs)
+            {
+                _lastWindowsMs = now;
+                Windows = State != DesktopLinkState.Missing && _windows is { HasFunction: true } w ? IpcContract.ParseWindows(w.InvokeFunc()) : null;
             }
 
             if (State != DesktopLinkState.Missing && (Interlocked.Exchange(ref _appsDirty, 0) == 1 || now - _lastAppsMs >= AppsIntervalMs))
@@ -169,6 +186,40 @@ public sealed class XivDesktopClient : IDisposable
         {
             LogOnce("XivDesktop.ToggleLauncher failed: " + ex.Message);
             return false;
+        }
+    }
+
+    /// <summary>A window action through XivDesktop.v1.WindowAction; returns its "ok: …"/"error: …".</summary>
+    public string WindowAction(string action, long id, string? pin = null, int workspace = 0)
+    {
+        if (_windowAction is null || !_windowAction.HasFunction) return "error: XivDesktop is not loaded";
+        try
+        {
+            var result = _windowAction.InvokeFunc(IpcContract.Serialize(new WindowActionRequest { Action = action, Id = id, Pin = pin, Workspace = workspace }));
+            _lastWindowsMs = long.MinValue / 2;
+            if (result.StartsWith("error", StringComparison.Ordinal)) LogOnce("WindowAction " + action + ": " + result);
+            return result;
+        }
+        catch (Exception ex)
+        {
+            LogOnce("XivDesktop.WindowAction failed: " + ex.Message);
+            return "error: " + ex.Message;
+        }
+    }
+
+    public string SwitchWorkspace(int n)
+    {
+        if (_workspace is null || !_workspace.HasFunction) return "error: XivDesktop is not loaded";
+        try
+        {
+            var result = _workspace.InvokeFunc(n);
+            _lastWindowsMs = long.MinValue / 2;
+            return result;
+        }
+        catch (Exception ex)
+        {
+            LogOnce("XivDesktop.Workspace failed: " + ex.Message);
+            return "error: " + ex.Message;
         }
     }
 
