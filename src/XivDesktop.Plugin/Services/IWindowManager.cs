@@ -32,4 +32,30 @@ public interface IWindowManager
     string Focus(long id);
 
     string Place(long id, string pin);
+
+    /// <summary>
+    /// ghostty-dalamud answers the v1.1 methods (window.hide, window.toggle_pet, terminal.new, focus.get,
+    /// focus.cycle, agent.apps). Probed with focus.get; false on an older build.
+    /// </summary>
+    bool Extended { get; }
+
+    /// <summary>The world panel with the keyboard (window or terminal), from focus.get; null when unknown.</summary>
+    FocusInfo? KeyboardFocus { get; }
+
+    /// <summary>The agent's app list (agent.apps); empty when the agent sends none.</summary>
+    IReadOnlyList<AgentApp> AgentApps { get; }
+
+    /// <summary>Raised on the framework thread when <see cref="AgentApps"/> changes.</summary>
+    event Action<IReadOnlyList<AgentApp>>? AgentAppsChanged;
+
+    string Hide(long id, bool hidden);
+
+    string TogglePet(long id);
+
+    string TerminalNew(string? profile, string? pin, Action<long>? onPanel = null);
+
+    string FocusCycle(int dir);
+
+    /// <summary>Asks the agent for its window and app lists again.</summary>
+    string RefreshAgentLists();
 }

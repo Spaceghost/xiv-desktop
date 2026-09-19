@@ -187,8 +187,9 @@ public sealed class WorkspaceModel
     }
 
     /// <summary>
-    /// The hide/show changes needed for the current workspace. Only world panels (pet or pin) can be hidden;
-    /// full-screen and tab views are left alone.
+    /// The hide/show changes needed for the current workspace. Only world panels (pet or pin) are hidden;
+    /// full-screen and tab views are left alone. A panel's reported <see cref="WindowPanel.Hidden"/> wins over
+    /// what <see cref="MarkHidden"/> recorded.
     /// </summary>
     public List<VisibilityChange> Plan(IReadOnlyList<WindowPanel> windows)
     {
@@ -199,7 +200,10 @@ public sealed class WorkspaceModel
                 continue;
             var ws = WorkspaceOf(w.Id);
             var wantHidden = ws != 0 && ws != Current;
-            if (wantHidden != hidden.Contains(w.Id))
+
+            // A ghostty-dalamud that reports "hidden" is the truth; an older one only has what we sent.
+            var isHidden = w.Hidden ?? hidden.Contains(w.Id);
+            if (wantHidden != isHidden)
                 plan.Add(new VisibilityChange(w.Id, wantHidden));
         }
 

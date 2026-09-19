@@ -88,4 +88,10 @@ public sealed record AppInfo
     public string? IconPath { get; init; }
 
     public string SourcePath { get; init; } = "";
+
+    /// <summary>
+    /// Set for apps listed by ghostty-agent (<c>agent.apps</c>): the agent's desktop id. Such an app is started
+    /// by the agent itself (<c>window.open {"match": "app:ID"}</c>), not through <see cref="Command"/>.
+    /// </summary>
+    public string? AgentId { get; init; }
 }

@@ -243,7 +243,7 @@ public sealed record PaletteCommandPayload
 
 public sealed record WindowActionRequest
 {
-    /// <summary>focus | close | pet | pin (pin here) | place (with Pin) | move (with Workspace).</summary>
+    /// <summary>focus | close | pet | pin (pin here) | toggle (pet ↔ pin where it is) | place (with Pin) | move (with Workspace).</summary>
     public string Action { get; init; } = "";
 
     /// <summary>Panel id; 0 or missing means the target panel (focused, else last focused).</summary>

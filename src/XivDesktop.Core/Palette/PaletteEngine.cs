@@ -226,7 +226,7 @@ public static class PaletteEngine
                 Command = new PaletteCommand(PaletteCommand.Launch, app.Id),
                 AppId = app.Id,
                 Enabled = launchable,
-                Reason = launchable ? null : !ctx.GhosttyAvailable ? "needs ghostty-dalamud" : "terminal app: not launched",
+                Reason = launchable ? null : !ctx.GhosttyAvailable ? "needs ghostty-dalamud" : app.Terminal ? "terminal app: needs ghostty-dalamud's terminal.new" : "cannot be started here",
             });
         }
     }

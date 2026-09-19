@@ -305,7 +305,7 @@ public sealed class WindowsWidget(
             {
                 var name = t.Title.Length > 0 ? t.Title : t.App.Length > 0 ? t.App : $"window {t.Id}";
                 Add("focus", "Focus " + name, () => client.WindowAction("focus", t.Id));
-                Add("toggle", t.Kind == "pet" ? "Pin here" : "Make pet", () => client.WindowAction(t.Kind == "pet" ? "pin" : "pet", t.Id));
+                Add("toggle", t.Kind == "pet" ? "Pin where it is" : "Make pet", () => client.WindowAction("toggle", t.Id));
                 Add("front", "Pin in front (follows you)", () => client.WindowAction("place", t.Id, "me"));
                 for (var n = 1; n <= 9; n++)
                 {

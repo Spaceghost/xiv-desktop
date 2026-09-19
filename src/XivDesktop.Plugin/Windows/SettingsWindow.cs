@@ -87,7 +87,24 @@ public sealed class SettingsWindow : Window
         }
 
         ImGui.Separator();
-        ImGui.TextDisabled("Terminal key (/term line, without \"/term\")");
+        ImGui.TextDisabled("Terminals (Super+Enter and Terminal=true apps, through terminal.new)");
+        var profile = config.TerminalProfile;
+        ImGui.SetNextItemWidth(160);
+        if (ImGui.InputTextWithHint("Profile", "ghostty's default", ref profile, 64))
+        {
+            config.TerminalProfile = profile.Trim();
+            changed = true;
+        }
+
+        var tpin = config.TerminalPin;
+        ImGui.SetNextItemWidth(160);
+        if (ImGui.InputText("Pin", ref tpin, 64) && tpin.Trim().Length > 0)
+        {
+            config.TerminalPin = tpin.Trim();
+            changed = true;
+        }
+
+        ImGui.TextDisabled("Older ghostty-dalamud without terminal.new: this /term line instead");
         var line = config.TerminalLine;
         ImGui.SetNextItemWidth(260);
         if (ImGui.InputText("##terminal", ref line, 200) && line.Trim().Length > 0)
@@ -221,7 +238,10 @@ public sealed class SettingsWindow : Window
     private void WindowsTab()
     {
         var w = session.Windows;
-        ImGui.TextUnformatted($"Launch backend: {desktop.Backend.Name}");
+        ImGui.TextUnformatted($"Launch backend: {desktop.Backend.Name}{(w.Extended ? " (v1.1 methods)" : "")}");
+        ImGui.TextUnformatted($"App list: {desktop.Catalog.Source}, {desktop.Catalog.Catalog.Apps.Count} apps (directory scan: {desktop.Catalog.Scanned.Apps.Count})");
+        if (w.Extended && ImGui.SmallButton("Ask the agent for its apps again"))
+            w.RefreshAgentLists();
         ImGui.TextUnformatted(w.WindowsAvailable ? "Window IPC: GhosttyDalamud.v1.Call registered" : "Window IPC: not registered (window list, workspaces and window actions are off)");
         if (w.Agent is { } a)
             ImGui.TextUnformatted($"Agent: {(a.Connected ? "connected" : "not connected")}, protocol {a.Version}, windows {(a.WindowsOk ? "yes" : "no")}{(a.Agent.Length > 0 ? " · " + a.Agent : "")}");
@@ -270,7 +290,7 @@ public sealed class SettingsWindow : Window
             ImGui.TableNextColumn();
             ImGui.TextUnformatted(p.DisplayName + (p.Focused ? "  (focused)" : ""));
             ImGui.TableNextColumn();
-            ImGui.TextDisabled($"{p.State} {p.Kind}{(session.IsHidden(p.Id) ? " hidden" : "")}");
+            ImGui.TextDisabled($"{p.State} {p.Kind}{(session.IsHiddenNow(p) ? " hidden" : "")}");
             ImGui.TableNextColumn();
             ImGui.TextUnformatted(session.WorkspaceOf(p.Id) is var ws and > 0 ? ws.ToString() : "-");
             ImGui.TableNextColumn();
@@ -280,7 +300,7 @@ public sealed class SettingsWindow : Window
                     session.Focus(p.Id);
                 ImGui.SameLine();
                 if (ImGui.SmallButton(p.IsPet ? "pin" : "pet"))
-                    session.Place(p.Id, p.IsPet ? config.PinArgs : "pet");
+                    session.TogglePet(p);
                 ImGui.SameLine();
                 if (ImGui.SmallButton("close"))
                     session.Close(p.Id);

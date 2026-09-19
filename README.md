@@ -9,7 +9,7 @@ keyboard-first launcher palette (Super+D), sway-style key chords, nine workspace
 notifications, IPC for other plugins and MCP, and two optional Umbra toolbar widgets ("Apps" and a "Windows"
 taskbar).
 
-> **Status (v1).** The solution builds against Dalamud API 15 (.NET 10). The pure logic (catalog, palette
+> **Status (v1.1).** The solution builds against Dalamud API 15 (.NET 10). The pure logic (catalog, palette
 > ranking, calculator, key chords, workspaces, ghostty's `window.list` JSON) has host-side tests, and the
 > scanner has been run against a real Bazzite host's application directories (Linux paths, not through
 > Wine). **Nothing has been observed in the game yet**, v0 or v1: not the palette, the key chords (including
@@ -129,11 +129,11 @@ All configurable in Settings → **Keybinds** (type a chord such as `Super+Shift
 | Default | Action |
 | --- | --- |
 | Super+D | toggle the launcher palette |
-| Super+Enter | open a terminal: posts the Settings → General *terminal line* to ghostty (`new`: a dropdown tab) |
+| Super+Enter | a new world terminal with `terminal.new` (profile and pin in Settings → General; default a pet); an older ghostty gets the *terminal line* (`new`: a dropdown tab) |
 | Super+Q | close the target window panel |
-| Super+Space | target panel: pet → pinned (`here`), pinned → pet |
+| Super+Space | target panel: `window.toggle_pet`, a pet is pinned where it was last shown, anything else becomes a pet |
 | Super+Shift+Space | pin the target panel in front of you (`here`) |
-| Super+Left / Super+Right | focus the previous / next window panel on this workspace |
+| Super+Left / Super+Right | `focus.cycle`: previous / next shown world panel (windows and terminals; hidden ones skipped) |
 | Super+1 … Super+9 | switch workspace |
 | Super+Shift+1 … Super+Shift+9 | move the target panel to that workspace |
 
@@ -144,32 +144,34 @@ All configurable in Settings → **Keybinds** (type a chord such as `Super+Shift
   track, which may include VK_LWIN/VK_RWIN, are read with `GetAsyncKeyState`, only while the game window is
   in the foreground. *Read keys globally* uses `GetAsyncKeyState` for every key, so chords also work while a
   window panel has the keyboard. Whether Wine delivers the Windows keys at all is **unverified**.
+- **While a panel has the keyboard** (after a click, `window.focus` or Super+Left/Right), ghostty sets
+  ImGui's `WantTextInput` every frame, so Dalamud keeps key messages from the game and `IKeyState` sees
+  nothing: chords do not fire. With *Read keys globally* on, XivDesktop reads them with `GetAsyncKeyState`
+  and lets them through while `focus.get` reports a focused panel; the keys also reach the app in the panel.
+  Esc twice gives the keyboard back to the game.
 - **Super under a Linux desktop.** The desktop can take Super before Wine sees it: sway binds `$mod+d`
   itself, and GNOME opens the overview on Super. Either unbind those for the game's window, or pick another
   modifier in Settings → Keybinds → *Modifier* and **Reset all to this modifier**: *Alt+Shift* (Shift
   variants become Ctrl+Alt+Shift) or *Ctrl+Alt* (Shift variants become Ctrl+Alt+Shift). The game itself
   binds some Alt and Ctrl chords; check the game's keybind settings for clashes.
-- `Super+Space` turns a pet into a pin with `/term pin here`, which pins it 2.5 yalms in front of you:
-  ghostty has no "pin it where it is now". Both pin arguments are editable (`me`, `target`, `orbit 3.5`, …).
-- `Super+Enter` with *terminal line* `pin pet` opens a new world terminal that follows you, but ghostty
-  pins the active dropdown tab, or a focused window panel, instead when there is one; `new` (the default)
-  always opens a tab.
+- On an older ghostty-dalamud without the v1.1 methods (XivDesktop probes with `focus.get`),
+  Super+Space falls back to `window.place` with `here` / `pet`, Super+Left/Right to XivDesktop's own cycle
+  over this workspace's window panels, Super+Enter to the terminal line, and hiding to `/term pin hide`.
 
 ## Workspaces
 
 Nine numbered workspaces, sway style. Every window panel belongs to one; a new panel joins the current
-workspace. Switching hides the other workspaces' panels with `window.place {"pin": "hide"}` and shows the
-current ones with `"hide off"` (ghostty's `/term pin hide`, which keeps the panel and its size but stops
-drawing it). Focusing a panel on another workspace (palette, taskbar) switches there first.
+workspace. Switching hides the other workspaces' panels with `window.hide {"id": N, "hidden": true}` and
+shows the current ones with `"hidden": false`: a hidden panel keeps its place and size but is neither drawn
+nor streamed. (An older ghostty-dalamud gets `window.place {"pin": "hide"}` / `"hide off"` instead.) Focusing a panel on another workspace (palette, taskbar) switches there first.
 
 Membership is saved in `pluginConfigs/XivDesktop.json` by panel id, title and app. Panel ids do not survive
 a ghostty reload or an agent reconnect, so a panel that comes back is re-bound best-effort: same title,
 else same app with the same "… - App" title stem. Turning off *Hide other workspaces' panels* keeps the
 grouping (palette, taskbar) and shows everything.
 
-Limits (ghostty's side): `window.list` does not report whether a panel is hidden, so XivDesktop tracks what
-it hid itself; re-placing a panel (pet/pin) shows it again, which XivDesktop accounts for; a panel hidden by
-something else is not known. Full-screen and tab views cannot be hidden.
+`window.list` reports each panel's `hidden` state, and XivDesktop re-sends a hide or show whenever the
+report disagrees with the current workspace. Full-screen and tab views are left alone.
 
 ## Notifications
 
@@ -187,7 +189,7 @@ Right-click the widget itself to open the launcher palette. The widget uses only
 
 The **Windows** widget is a taskbar: the current workspace number, then a strip of the open window panels
 (a letter tile and the title; the focused one outlined). Click a panel to focus it, middle-click to close it,
-right-click for *Pin here / Make pet*, *Pin in front*, *Move to workspace N* and *Close*. Clicking the
+right-click for *Pin where it is / Make pet*, *Pin in front*, *Move to workspace N* and *Close*. Clicking the
 workspace number lists every panel and workspace. Its settings: title length, and whether panels on other
 workspaces are listed (dimmed). Umbra's `MenuPopup` is sealed and a widget cannot raise Umbra's open-popup
 event itself, so the right-click menu is opened through that event's backing field by reflection.
@@ -196,6 +198,18 @@ event itself, so the right-click menu is opened through that event's backing fie
 the reflection above are unverified.
 
 ## What gets listed
+
+**First choice: ghostty-agent's list.** When ghostty-dalamud answers `agent.apps` with a non-empty list,
+that list is the catalog. The agent runs on the host and reads every .desktop file there; XIVLauncher as a
+Flatpak shows the game only its sandbox, where the `Z:\` scan below found 17 of 85 apps on one host. Agent
+apps start with `window.open {"match": "app:<id>"}` (the agent starts its own entry); their icons are the
+PNG paths the agent sends (rendered under `$HOME`, which the sandbox can read), else an icon-theme lookup,
+else the scan's icon, else a letter tile. Ids get a `.desktop` suffix so favourites and recents carry over.
+The list is re-read whenever the agent sends a new window list; while it is empty XivDesktop asks for one
+at most every 30 s. The directory scan below stays as the fallback, and Settings → Windows shows which one
+is in use.
+
+**Fallback: the directory scan.**
 
 - **Directories**, in increasing priority (a later directory replaces an earlier entry with the same
   desktop-file id): `/usr/share/applications`, `/usr/local/share/applications`,
@@ -217,10 +231,11 @@ the reflection above are unverified.
   ones) are removed, and so are flatpak's empty `@@u … @@` file-forwarding markers. Each argument is then
   re-quoted for `sh`. Anything outside `[A-Za-z0-9_-./=:,+@%]` is single-quoted, so the command line
   ghostty-agent hands to `sh -c` has no unintended expansion.
-- **Terminal=true** apps are listed (dimmed) but **not launched** in v0. `window pull run` starts a
-  Wayland client with no terminal attached, so a TUI would run invisibly. Opening a ghostty tab (`new`) and
-  typing the command into it (`send`) would work in principle. The two posts are not ordered against the
-  new tab becoming active, though, so v0 refuses with an explanation instead.
+- **Terminal=true** apps start in a new world terminal: `terminal.new` (profile and pin from Settings →
+  General), and once its panel id comes back in `window.list`'s `requests`, 1.5 s later,
+  `/term send #<id> <command>` types the command and Enter into it. The delay is a guess at how long the
+  agent takes to start the shell (unverified). Without `terminal.new` (older ghostty-dalamud, or only the
+  Post gate) they are still refused.
 - **Icons:** an absolute `Icon=` path, then the `hicolor`, `Adwaita`, `AdwaitaLegacy` and `breeze` themes
   at 256, 128, 96, 64 and 48 px (then 512 px) under `/usr/share/icons`, `$HOME/.local/share/icons` and the
   flatpak export dirs, then `/usr/share/pixmaps`. Only PNG is loaded. SVG-only icons, and icons not found
@@ -304,18 +319,18 @@ work here too. Palette only ranks; to act, use `Launch`, `WindowAction` or `Work
 `XivDesktop.v1.WindowAction` takes:
 
 ```json
-{"action": "focus|close|pet|pin|place|move", "id": 12, "pin": "orbit 3.5", "workspace": 3}
+{"action": "focus|close|pet|pin|toggle|place|move", "id": 12, "pin": "orbit 3.5", "workspace": 3}
 ```
 
 `id` 0 or missing means the target panel. `pin` is only for `place` (as `/term pin` takes it); `pin` is
-`place` with `here`; `workspace` is only for `move`.
+`place` with `here`; `toggle` is `window.toggle_pet`; `workspace` is only for `move`.
 
 ## Development
 
 ```sh
 ~/.dotnet/dotnet build            # everything; outputs go to ~/xiv-desktop-build/artifacts
 ~/.dotnet/dotnet test             # host tests: catalog, search, IPC payloads, palette, calculator, chords,
-                                  # workspaces, ghostty window.list parsing (182 tests)
+                                  # workspaces, ghostty window.list parsing, agent apps (188 tests)
 ```
 
 Tests build throwaway directory trees for icon and override cases. They never touch Dalamud or the game.

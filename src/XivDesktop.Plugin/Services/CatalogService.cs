@@ -15,8 +15,10 @@ public sealed class CatalogService : IDisposable
     private readonly string configDirectory;
     private readonly object gate = new();
     private CancellationTokenSource? scanCts;
-    private volatile AppCatalog catalog = AppCatalog.Empty;
+    private volatile AppCatalog catalog = AppCatalog.Empty;   // the directory scan
+    private volatile AppCatalog? agentCatalog;                // ghostty-agent's list, when it sends one
     private volatile bool scanning;
+    private int agentBuild;
 
     public CatalogService(IDalamudPluginInterface pi, IPluginLog log, Func<string> homeOverride)
     {
@@ -25,7 +27,70 @@ public sealed class CatalogService : IDisposable
         configDirectory = pi.ConfigDirectory.FullName;
     }
 
-    public AppCatalog Catalog => catalog;
+    /// <summary>
+    /// ghostty-agent's app list when it has one (it reads the host's .desktop files, which a sandboxed game
+    /// cannot see), else the Z:\ directory scan.
+    /// </summary>
+    public AppCatalog Catalog => agentCatalog is { Apps.Count: > 0 } a ? a : catalog;
+
+    /// <summary>The directory scan alone.</summary>
+    public AppCatalog Scanned => catalog;
+
+    /// <summary>"agent" or "scan": where <see cref="Catalog"/> comes from.</summary>
+    public string Source => agentCatalog is { Apps.Count: > 0 } ? "ghostty-agent" : "directory scan";
+
+    /// <summary>
+    /// Replaces the agent's part of the catalog. Icon lookups touch Z:\, so the build runs on the thread pool;
+    /// an empty list falls back to the directory scan.
+    /// </summary>
+    public void SetAgentApps(IReadOnlyList<XivDesktop.Core.Windows.AgentApp> apps)
+    {
+        var build = Interlocked.Increment(ref agentBuild);
+        if (apps.Count == 0)
+        {
+            agentCatalog = null;
+            RaiseChanged();
+            return;
+        }
+
+        _ = Task.Run(() =>
+        {
+            try
+            {
+                var paths = Paths();
+                var next = AgentCatalog.Build(apps, AgentCatalog.IconMapper(paths.ToLocal, new IconResolver(paths)), catalog);
+                if (build != Volatile.Read(ref agentBuild))
+                    return;
+                agentCatalog = next;
+                log.Information("XivDesktop: {Apps} apps from ghostty-agent ({Png} with icons)", next.Apps.Count, next.Stats.IconsPng);
+                RaiseChanged();
+            }
+            catch (Exception ex)
+            {
+                log.Warning(ex, "XivDesktop: building the agent catalog failed");
+            }
+        });
+    }
+
+    private HostPaths Paths()
+    {
+        var home = homeOverride();
+        if (string.IsNullOrWhiteSpace(home))
+            home = HostPaths.GuessHome(Environment.GetEnvironmentVariable("HOME"), Environment.GetEnvironmentVariable("WINEHOMEDIR"), configDirectory);
+        return OperatingSystem.IsWindows() ? HostPaths.Wine(home) : HostPaths.Native(home);
+    }
+
+    private void RaiseChanged()
+    {
+        try
+        {
+            Changed?.Invoke();
+        }
+        catch (Exception ex)
+        {
+            log.Debug(ex, "XivDesktop: catalog Changed handler failed");
+        }
+    }
 
     public bool Scanning => scanning;
 

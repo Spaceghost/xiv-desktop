@@ -74,7 +74,7 @@ public sealed class DesktopIpc : IDisposable
     private static string WindowAction(SessionService session, string? json)
     {
         if (IpcContract.ParseWindowAction(json) is not { } a)
-            return "error: expected {\"action\": \"focus|close|pet|pin|place|move\", \"id\": N, ...}";
+            return "error: expected {\"action\": \"focus|close|pet|pin|toggle|place|move\", \"id\": N, ...}";
         var id = a.Id != 0 ? a.Id : session.Target()?.Id ?? 0;
         if (id == 0)
             return "error: no window panel to act on";
@@ -83,6 +83,7 @@ public sealed class DesktopIpc : IDisposable
             "focus" => session.Focus(id),
             "close" => session.Close(id),
             "pet" => session.Place(id, "pet"),
+            "toggle" => session.Windows.Snapshot.Find(id) is { } w ? session.TogglePet(w) : $"error: no window panel {id}",
             "pin" => session.Place(id, "here"),
             "place" => string.IsNullOrWhiteSpace(a.Pin) ? "error: place needs \"pin\"" : session.Place(id, a.Pin),
             "move" => session.Move(id, a.Workspace),
