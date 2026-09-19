@@ -6,6 +6,7 @@ using Dalamud.Interface.Windowing;
 using Dalamud.Plugin;
 using Dalamud.Plugin.Services;
 using XivDesktop.Core;
+using XivDesktop.Core.Input;
 using XivDesktop.Core.Palette;
 using XivDesktop.Plugin.Services;
 
@@ -45,6 +46,8 @@ public sealed class PaletteWindow : Window
     private int framesOpen;
     private string? flash;
     private DateTime flashUntil;
+    private int hint;              // which row action Tab has selected (0 = the Enter action)
+    private int hintFor = -1;      // the row that hint belongs to
     private int pushedVars;
     private int pushedColors;
 
@@ -182,11 +185,12 @@ public sealed class PaletteWindow : Window
             RunSelected();
 
         ImGui.Dummy(new Vector2(0, 2 * scale));
-        var footer = ImGui.GetTextLineHeightWithSpacing() + (4 * scale);
+        var actions = SelectedActions();
+        var footer = (ImGui.GetTextLineHeightWithSpacing() * (actions.Count > 1 ? 2 : 1)) + (6 * scale);
         if (ImGui.BeginChild("##xivdesktop-palette-rows", new Vector2(0, -footer), false))
             DrawRows(scale);
         ImGui.EndChild();
-        DrawFooter();
+        DrawFooter(actions, scale);
 
         if (config.PaletteCloseOnFocusLoss && framesOpen > 6 && !ImGui.IsWindowFocused(ImGuiFocusedFlags.RootAndChildWindows))
             IsOpen = false;
@@ -212,16 +216,21 @@ public sealed class PaletteWindow : Window
         selected = Math.Clamp(selected, 0, Math.Max(0, results.Count - 1));
     }
 
-    /// <summary>Returns true when Enter was pressed outside the input (the input reports its own Enter).</summary>
+    /// <summary>
+    /// Selection, row actions and Tab. Returns true when Enter was pressed outside the input (the input reports
+    /// its own Enter). Up/Down or Ctrl+J/K select; Tab/Shift+Tab cycle the selected row's actions; the row
+    /// action chords (Ctrl+P/H/M/W, Alt+arrows, Alt+Home/End) run directly.
+    /// </summary>
     private bool HandleKeys()
     {
         if (!ImGui.IsWindowFocused(ImGuiFocusedFlags.RootAndChildWindows))
             return false;
         var io = ImGui.GetIO();
         var before = selected;
-        if (ImGui.IsKeyPressed(ImGuiKey.DownArrow) || (io.KeyCtrl && (ImGui.IsKeyPressed(ImGuiKey.J) || ImGui.IsKeyPressed(ImGuiKey.N))) || (ImGui.IsKeyPressed(ImGuiKey.Tab) && !io.KeyShift))
+        var plainNav = !io.KeyAlt;
+        if (plainNav && (ImGui.IsKeyPressed(ImGuiKey.DownArrow) || (io.KeyCtrl && ImGui.IsKeyPressed(ImGuiKey.J))))
             selected = Math.Min(results.Count - 1, selected + 1);
-        if (ImGui.IsKeyPressed(ImGuiKey.UpArrow) || (io.KeyCtrl && (ImGui.IsKeyPressed(ImGuiKey.K) || ImGui.IsKeyPressed(ImGuiKey.P))) || (ImGui.IsKeyPressed(ImGuiKey.Tab) && io.KeyShift))
+        if (plainNav && (ImGui.IsKeyPressed(ImGuiKey.UpArrow) || (io.KeyCtrl && ImGui.IsKeyPressed(ImGuiKey.K))))
             selected = Math.Max(0, selected - 1);
         if (ImGui.IsKeyPressed(ImGuiKey.PageDown))
             selected = Math.Min(results.Count - 1, selected + 8);
@@ -229,20 +238,88 @@ public sealed class PaletteWindow : Window
             selected = Math.Max(0, selected - 8);
         selected = Math.Max(0, selected);
         scrollToSelected |= before != selected;
+
         if (ImGui.IsKeyPressed(ImGuiKey.Escape))
         {
             IsOpen = false;
             return false;
         }
 
+        var actions = SelectedActions();
+        if (actions.Count > 1 && ImGui.IsKeyPressed(ImGuiKey.Tab))
+        {
+            hint = ((hint + (io.KeyShift ? -1 : 1)) % actions.Count + actions.Count) % actions.Count;
+            focusInput = true;
+        }
+
+        foreach (var action in actions)
+        {
+            if (!action.Chord.IsNone && ChordPressed(io, action.Chord))
+            {
+                RunAction(results[selected], action);
+                break;
+            }
+        }
+
         return ImGui.IsKeyPressed(ImGuiKey.KeypadEnter) || (!ImGui.IsAnyItemActive() && ImGui.IsKeyPressed(ImGuiKey.Enter));
+    }
+
+    /// <summary>The selected row's actions; the Tab choice resets when the selection moves.</summary>
+    private List<RowAction> SelectedActions()
+    {
+        if (selected < 0 || selected >= results.Count)
+            return [];
+        if (hintFor != selected)
+        {
+            hintFor = selected;
+            hint = 0;
+        }
+
+        var actions = PaletteEngine.RowActions(results[selected]);
+        hint = Math.Clamp(hint, 0, actions.Count - 1);
+        return actions;
+    }
+
+    private static bool ChordPressed(ImGuiIOPtr io, KeyChord chord)
+    {
+        var key = chord.Key switch
+        {
+            >= 'A' and <= 'Z' => ImGuiKey.A + (chord.Key - 'A'),
+            0x25 => ImGuiKey.LeftArrow,
+            0x27 => ImGuiKey.RightArrow,
+            0x24 => ImGuiKey.Home,
+            0x23 => ImGuiKey.End,
+            _ => ImGuiKey.None,
+        };
+        if (key == ImGuiKey.None || !ImGui.IsKeyPressed(key))
+            return false;
+        var mods = (io.KeyCtrl ? KeyMods.Ctrl : 0) | (io.KeyAlt ? KeyMods.Alt : 0) | (io.KeyShift ? KeyMods.Shift : 0) | (io.KeySuper ? KeyMods.Super : 0);
+        return mods == chord.Mods;
     }
 
     private void RunSelected()
     {
         focusInput = true;
-        if (selected >= 0 && selected < results.Count)
+        if (selected < 0 || selected >= results.Count)
+            return;
+        var actions = SelectedActions();
+        if (hint > 0 && hint < actions.Count)
+            RunAction(results[selected], actions[hint]);
+        else
             Run(results[selected]);
+    }
+
+    /// <summary>A row action other than the primary keeps the palette open, so several can follow by keyboard.</summary>
+    private void RunAction(PaletteItem item, RowAction action)
+    {
+        if (action.Chord.IsNone)
+        {
+            Run(item);
+            return;
+        }
+
+        focusInput = true;
+        Flash(runner.Run(action.Command) is var r && r.StartsWith("ok", StringComparison.Ordinal) ? $"ok: {action.Label} · {item.Title}" : r);
     }
 
     private void Run(PaletteItem item)
@@ -355,6 +432,23 @@ public sealed class PaletteWindow : Window
             case PaletteProvider.App when item.AppId != null && desktop.Catalog.Catalog.Find(item.AppId) is { } app:
                 IconDrawer.App(textures, draw, app, pos, size, dimmed: !item.Enabled);
                 return;
+            case PaletteProvider.Panel:
+                var pw = item.WindowId is { } pid ? session.Windows.Snapshot.Find(pid) : null;
+                if (item.PanelKind == "window" && pw != null && session.AppFor(pw) is { } papp)
+                {
+                    IconDrawer.App(textures, draw, papp, pos, size, dimmed: item.PanelView == "hidden");
+                    return;
+                }
+
+                var kindGlyph = item.PanelKind switch
+                {
+                    "terminal" => FontAwesomeIcon.Terminal,
+                    "chat" => FontAwesomeIcon.Comments,
+                    "adopted" => FontAwesomeIcon.Link,
+                    _ => FontAwesomeIcon.WindowMaximize,
+                };
+                IconDrawer.Glyph(ui, draw, kindGlyph, ImGui.GetColorU32(BadgeColor(PaletteProvider.Window) with { W = 0.30f }), glyphCol, pos, size);
+                return;
             case PaletteProvider.Window when item.WindowId is { } id && session.Windows.Snapshot.Find(id) is { } w:
                 if (session.AppFor(w) is { } wapp)
                 {
@@ -421,8 +515,11 @@ public sealed class PaletteWindow : Window
         }
     }
 
-    private void DrawFooter()
+    private void DrawFooter(List<RowAction> actions, float scale)
     {
+        if (actions.Count > 1)
+            DrawActionHints(actions, scale);
+
         if (flash != null && DateTime.UtcNow < flashUntil)
         {
             ImGui.TextColored(flash.StartsWith("ok", StringComparison.Ordinal) ? new Vector4(0.5f, 0.9f, 0.6f, 1) : new Vector4(1f, 0.65f, 0.35f, 1), flash);
@@ -430,13 +527,44 @@ public sealed class PaletteWindow : Window
         }
 
         var ws = session.Windows.WindowsAvailable ? $"workspace {session.CurrentWorkspace}  ·  " : "";
-        ImGui.TextDisabled($"{ws}↑↓ select  ·  Enter run  ·  Esc close  ·  a: apps  w: windows  = calc  > commands");
+        var tab = actions.Count > 1 ? "Tab action  ·  " : "";
+        ImGui.TextDisabled($"{ws}↑↓ select  ·  Enter run  ·  {tab}Esc close  ·  a: apps  w: panels  = calc  > commands");
+    }
+
+    /// <summary>The selected row's actions as chips ("Ctrl+P Pin"); the one Tab picked is highlighted and runs on Enter.</summary>
+    private void DrawActionHints(List<RowAction> actions, float scale)
+    {
+        var draw = ImGui.GetWindowDrawList();
+        var pos = ImGui.GetCursorScreenPos();
+        var right = pos.X + ImGui.GetContentRegionAvail().X;
+        var x = pos.X;
+        var h = ImGui.GetTextLineHeight();
+        var dim = ImGui.GetColorU32(ImGuiCol.TextDisabled);
+        var text = ImGui.GetColorU32(ImGuiCol.Text);
+        for (var i = 0; i < actions.Count; i++)
+        {
+            var a = actions[i];
+            var key = a.Hint.Replace("Ctrl+", "^", StringComparison.Ordinal);
+            var keyW = ImGui.CalcTextSize(key).X;
+            var w = keyW + ImGui.CalcTextSize(a.Label).X + (14 * scale);
+            if (x + w > right)
+                break;
+            var min = new Vector2(x, pos.Y);
+            var max = new Vector2(x + w, pos.Y + h + (2 * scale));
+            var on = i == hint;
+            draw.AddRectFilled(min, max, ImGui.GetColorU32(on ? Accent with { W = 0.35f } : new Vector4(1, 1, 1, 0.06f)), 5 * scale);
+            draw.AddText(new Vector2(x + (5 * scale), pos.Y + scale), on ? text : dim, key);
+            draw.AddText(new Vector2(x + keyW + (9 * scale), pos.Y + scale), on ? text : ImGui.GetColorU32(Accent), a.Label);
+            x += w + (5 * scale);
+        }
+
+        ImGui.Dummy(new Vector2(0, h + (4 * scale)));
     }
 
     private static Vector4 BadgeColor(PaletteProvider p) => p switch
     {
         PaletteProvider.App => new Vector4(0.40f, 0.66f, 1.00f, 1f),
-        PaletteProvider.Window => new Vector4(0.40f, 0.85f, 0.60f, 1f),
+        PaletteProvider.Window or PaletteProvider.Panel => new Vector4(0.40f, 0.85f, 0.60f, 1f),
         PaletteProvider.Action => new Vector4(1.00f, 0.74f, 0.35f, 1f),
         PaletteProvider.Calc => new Vector4(1.00f, 0.50f, 0.72f, 1f),
         _ => Accent,
