@@ -35,6 +35,10 @@ public sealed class GhosttyCallBackend : ILaunchBackend, IWindowManager, IDispos
     private long appsForLists = -1;
     private long lastRefreshMs = long.MinValue / 2;
     private const long RefreshIntervalMs = 30_000;
+    private const long PanelProbeIntervalMs = 10_000;
+    private volatile PanelListSnapshot? panels;
+    private bool panelsSupported = true;
+    private long lastPanelProbeMs = long.MinValue / 2;
     private long lastListMs = long.MinValue / 2;
     private long lastAgentMs = long.MinValue / 2;
     private string? lastLoggedError;
@@ -62,6 +66,19 @@ public sealed class GhosttyCallBackend : ILaunchBackend, IWindowManager, IDispos
     public FocusInfo? KeyboardFocus => focus;
 
     public IReadOnlyList<AgentApp> AgentApps => agentApps;
+
+    public PanelListSnapshot? PanelSnapshot => panels;
+
+    public string PanelChange(string method, long id, string arg = "") => method switch
+    {
+        "focus" => Change(Panels.Focus(id)),
+        "close" => Change(Panels.Close(id)),
+        "minimize" => Change(Panels.Minimize(id)),
+        "toggle_pet" => Change(Panels.TogglePet(id)),
+        "place" => Change(Panels.Place(id, arg)),
+        "order" => Change(Panels.Order(id, arg)),
+        _ => $"error: unknown panel method {method}",
+    };
 
     public bool WindowsAvailable
     {
@@ -195,6 +212,7 @@ public sealed class GhosttyCallBackend : ILaunchBackend, IWindowManager, IDispos
                     Publish(WindowListSnapshot.Empty);
                 agent = null;
                 focus = null;
+                panels = null;
                 Extended = false;
                 return;
             }
@@ -209,6 +227,7 @@ public sealed class GhosttyCallBackend : ILaunchBackend, IWindowManager, IDispos
             // focus.get doubles as the probe for the v1.1 methods (they arrived together).
             focus = GhosttyWire.ParseFocus(call.InvokeFunc(GhosttyWire.FocusGet()));
             Extended = focus != null;
+            PollPanels(now);
 
             var reply = GhosttyWire.ParseReply(call.InvokeFunc(GhosttyWire.List()));
             var rev = GhosttyWire.PeekRev(reply);
@@ -258,6 +277,24 @@ public sealed class GhosttyCallBackend : ILaunchBackend, IWindowManager, IDispos
 
         if (agentApps.Count == 0 && now - lastRefreshMs >= RefreshIntervalMs)
             RefreshAgentLists();
+    }
+
+    /// <summary>panel.list each poll while it answers; after a refusal (older ghostty) probe again every 10 s.</summary>
+    private void PollPanels(long now)
+    {
+        if (!panelsSupported && now - lastPanelProbeMs < PanelProbeIntervalMs)
+            return;
+        lastPanelProbeMs = now;
+        var next = Panels.ParseList(call.InvokeFunc(Panels.List()));
+        panelsSupported = next != null;
+        if (next == null)
+        {
+            panels = null;
+            return;
+        }
+
+        if (panels == null || panels.Rev != next.Rev)
+            panels = next;
     }
 
     private static bool SameApps(IReadOnlyList<AgentApp> a, IReadOnlyList<AgentApp> b)

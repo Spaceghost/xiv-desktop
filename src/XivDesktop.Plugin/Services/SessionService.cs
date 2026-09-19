@@ -88,6 +88,46 @@ public sealed class SessionService : IDisposable
 
     public string Close(long id) => Report(windows.Close(id));
 
+    /// <summary>
+    /// Focus any panel. Window panels on another workspace switch there first. With panel.list the panel.focus
+    /// method is used (terminals, chat and adopted windows too); else window.focus.
+    /// </summary>
+    public string FocusPanel(long id)
+    {
+        if (windows.PanelSnapshot == null)
+            return Focus(id);
+        var ws = workspaces.WorkspaceOf(id);
+        if (ws != 0 && ws != workspaces.Current)
+            SwitchWorkspace(ws);
+        var r = windows.PanelChange("focus", id);
+        if (r.StartsWith("ok", StringComparison.Ordinal))
+            lastFocused = id;
+        return Report(r);
+    }
+
+    /// <summary>
+    /// A panel.* change; on an older ghostty the window.* equivalent where there is one (close, place,
+    /// toggle_pet), else an error naming what is missing (minimize, order).
+    /// </summary>
+    public string PanelOp(string method, long id, string arg = "")
+    {
+        if (windows.PanelSnapshot != null)
+        {
+            var r = windows.PanelChange(method, id, arg);
+            if (method == "place" && r.StartsWith("ok", StringComparison.Ordinal))
+                workspaces.MarkHidden(id, false);
+            return Report(r);
+        }
+
+        return method switch
+        {
+            "close" => Close(id),
+            "place" => Place(id, arg),
+            "toggle_pet" => windows.Snapshot.Find(id) is { } w ? TogglePet(w) : Report($"error: no window panel {id}"),
+            _ => Report($"error: {method} needs ghostty-dalamud's panel IPC (panel.{method})"),
+        };
+    }
+
     public string Place(long id, string pin)
     {
         var r = windows.Place(id, pin);
