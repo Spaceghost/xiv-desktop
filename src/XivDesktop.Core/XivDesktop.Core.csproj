@@ -1,0 +1,13 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- Pure library: .desktop parsing, Exec handling, icon lookup, search. BCL only, no Dalamud. -->
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <RootNamespace>XivDesktop.Core</RootNamespace>
+    <AssemblyName>XivDesktop.Core</AssemblyName>
+    <Version>0.1.0.0</Version>
+    <IsPackable>false</IsPackable>
+  </PropertyGroup>
+  <ItemGroup>
+    <InternalsVisibleTo Include="XivDesktop.Core.Tests" />
+  </ItemGroup>
+</Project>

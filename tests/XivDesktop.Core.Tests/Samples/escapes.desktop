@@ -1,0 +1,6 @@
+[Desktop Entry]
+Type=Application
+Name=Escapes\sand\tTabs
+Comment=line1\nline2
+Keywords=semi\;colon;plain;
+Exec=echo 100%% %i %c %k

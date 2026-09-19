@@ -1,0 +1,5 @@
+[Desktop Entry]
+Type=Application
+Name=Quoting Test
+Exec="/opt/My App/bin/app" --title "it's \\"quoted\\"" --cost "\\$5" --path=C:\\\\dir %f
+Icon=quoting
