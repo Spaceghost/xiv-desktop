@@ -252,6 +252,22 @@ To see what your host would list, without the game:
 ~/.dotnet/dotnet run --project tools/scan -- --all --missing
 ```
 
+## Ask an NPC (`/npc`)
+
+`/npc <question>` summons a speaker beside your character (a client-side character only you see: an NPC,
+one of your minions, mounts or summons, or a copy of yourself) and opens a Talk-style dialogue at the bottom
+of the screen. Answers stream from almanac's local gateway and type out at the game's pace; you keep asking
+follow-ups in the dialogue's own text input. `/npc` alone summons it, `/npc bye` dismisses it, `/npc who`
+opens the picker, `/npc as <search>` picks who. The command is `/npc` because ghostty-dalamud owns `/ask`
+(its chat panel); Settings → Ask can also claim `/ask` when no other plugin holds it.
+Design, backend choice, spawning and risks: [docs/ASK.md](docs/ASK.md). Not observed in the game yet.
+
+> **Note for the palette (Super+D).** The palette's `ask …` Command row should call
+> `XivDesktop.v1.Ask` with the text after `ask` (e.g. `"how do I get to Ishgard"`), and an `ask as <npc>`
+> row should pass `"as <name> …"` (presets `scholar`, `moogle`, `archivist`, `myself`, favourites by name,
+> or keys like `npc:1040124`). Favourites are `Configuration.AskFavourites` (speaker keys). The gate returns
+> `"ok: …"`/`"error: …"` at once; the answer appears in the in-game dialogue.
+
 ## IPC (`XivDesktop.v1.*`)
 
 For other plugins, the Umbra widget, and later MCP tools. Payloads are JSON strings (camelCase). Names and
@@ -268,6 +284,7 @@ shapes are in [src/Shared/IpcContract.cs](src/Shared/IpcContract.cs).
 | `XivDesktop.v1.Workspace` | `Func<int, string>` | `1..9` switches; `0` only reports; `"ok: workspace N"` or `"error: REASON"` |
 | `XivDesktop.v1.Palette` | `Func<string, string>` | the palette's top 10 rows for a query, see below |
 | `XivDesktop.v1.WindowAction` | `Func<string, string>` | `"ok: …"` or `"error: …"`; takes the JSON below |
+| `XivDesktop.v1.Ask` | `Func<string, string>` | what follows `/npc` (question, `""`, `bye`, `as <who> …`); `"ok: …"` or `"error: …"` |
 
 `ok` from `Launch` means the command was handed to ghostty-dalamud, not that a window appeared. `ok` from
 `WindowAction` and `Workspace` means ghostty queued the change; the outcome shows in the next `Windows`.

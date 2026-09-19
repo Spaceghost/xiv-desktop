@@ -28,6 +28,9 @@ public sealed class SettingsWindow : Window
         SizeCondition = ImGuiCond.FirstUseEver;
     }
 
+    /// <summary>Draws the "Ask" tab (set by the Ask-an-NPC module).</summary>
+    public Action? AskTab { get; set; }
+
     public override void OnOpen() => editing.Clear();
 
     public override void Draw()
@@ -49,6 +52,12 @@ public sealed class SettingsWindow : Window
         if (ImGui.BeginTabItem("Windows"))
         {
             WindowsTab();
+            ImGui.EndTabItem();
+        }
+
+        if (AskTab is not null && ImGui.BeginTabItem("Ask"))
+        {
+            AskTab();
             ImGui.EndTabItem();
         }
 

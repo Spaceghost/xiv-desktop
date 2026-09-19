@@ -41,7 +41,7 @@ fi
 stage="${XIVDESKTOP_STAGE:-$(cd "$repo/.." && pwd -P)/xiv-desktop-build/devplugin}"
 mkdir -p "$stage"
 src_dir="$(dirname "$dll")"
-for f in XivDesktop.json XivDesktop.Core.dll XivDesktop.Core.pdb XivDesktop.deps.json XivDesktop.pdb XivDesktop.dll; do
+for f in XivDesktop.json XivDesktop.Core.dll XivDesktop.Core.pdb XivDesktop.deps.json XivDesktop.pdb XivDesktop.dll KamiToolKit.dll; do
   [[ -f "$src_dir/$f" ]] || continue
   cp "$src_dir/$f" "$stage/.$f.tmp" && mv -f "$stage/.$f.tmp" "$stage/$f"
 done

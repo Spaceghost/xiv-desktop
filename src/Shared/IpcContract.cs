@@ -52,6 +52,14 @@ public static class IpcContract
     /// </summary>
     public const string WindowAction = "XivDesktop.v1.WindowAction";
 
+    /// <summary>
+    /// Func&lt;string, string&gt;: "Ask an NPC". The argument is what follows /ask: a question (summons the speaker if
+    /// needed and asks), "" (summon for a conversation), "bye" (dismiss), "as &lt;preset|key|favourite&gt; [question]"
+    /// (switch speaker first; keys are "npc:ID", "minion:ID", "mount:ID", "pet:ID", "self"). Returns "ok: …" or
+    /// "error: …" at once; the answer streams into the in-game dialogue.
+    /// </summary>
+    public const string Ask = "XivDesktop.v1.Ask";
+
     // ghostty-dalamud's gates (provided by ghostty-dalamud, consumed here).
     public const string GhosttyStatus = "GhosttyDalamud.v1.Status";
     public const string GhosttyPost = "GhosttyDalamud.v1.Post";
