@@ -31,6 +31,12 @@ public sealed class CommandRunner
     /// <summary>Opens or closes the app grid (argument: initial search).</summary>
     public Action<string> ToggleGrid { get; set; } = _ => { };
 
+    /// <summary>The Claude sessions, once they are wired up.</summary>
+    public Claude.ClaudeService? Claude { get; set; }
+
+    /// <summary>Brings the Claude panel up.</summary>
+    public Action ShowClaude { get; set; } = () => { };
+
     public PaletteContext Context()
     {
         var target = session.Target();
@@ -47,6 +53,18 @@ public sealed class CommandRunner
             GhosttyAvailable = desktop.Backend.Available,
             WindowsAvailable = session.Windows.WindowsAvailable,
             CanLaunch = a => desktop.CanLaunch(a, out _),
+            ClaudeAvailable = Claude is { Transport.Ready: true },
+            ClaudeReason = Claude == null ? "the Claude panel is not loaded"
+                : Claude.Transport.Ready ? null
+                : Claude.Transport.Problem,
+            ClaudeSessions = Claude?.Sessions
+                .Select(s => (s.Key, $"{s.Look.Nameplate} · {s.Conversation.Activity.ToString().ToLowerInvariant()}"))
+                .ToList() ?? [],
+            ClaudeRecent = Claude?.Remembered
+                .Where(r => Claude.Sessions.All(s => !string.Equals(s.Key, r.Key, StringComparison.OrdinalIgnoreCase)))
+                .Take(8)
+                .Select(r => (r.Key, r.Summary(DateTimeOffset.UtcNow)))
+                .ToList() ?? [],
         };
     }
 
@@ -91,6 +109,21 @@ public sealed class CommandRunner
                 case PaletteCommand.Grid:
                     ToggleGrid("");
                     return "ok";
+                case PaletteCommand.Claude:
+                    if (Claude == null)
+                        return "error: the Claude panel is not loaded";
+                    ShowClaude();
+                    return Claude.Send(null, c.Arg);
+                case PaletteCommand.ClaudeSession:
+                    if (Claude == null)
+                        return "error: the Claude panel is not loaded";
+                    ShowClaude();
+                    return Claude.Focus(c.Arg);
+                case PaletteCommand.ClaudeResume:
+                    if (Claude == null)
+                        return "error: the Claude panel is not loaded";
+                    ShowClaude();
+                    return Claude.Resume(c.Arg);
                 default:
                     return $"error: unknown command {c.Kind}";
             }

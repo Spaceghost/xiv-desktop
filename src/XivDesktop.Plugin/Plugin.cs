@@ -3,6 +3,7 @@ using Dalamud.Interface.ImGuiNotification;
 using Dalamud.Interface.Windowing;
 using Dalamud.Plugin;
 using Dalamud.Plugin.Services;
+using XivDesktop.Plugin.Claude;
 using XivDesktop.Plugin.Ask;
 using XivDesktop.Plugin.Ipc;
 using XivDesktop.Plugin.Services;
@@ -18,6 +19,9 @@ public sealed class Plugin : IDalamudPlugin
 {
     public const string Command = "/desktop";
 
+    /// <summary>The Claude panel: <c>/claude</c>, <c>/claude &lt;prompt&gt;</c>, new, list, resume, look.</summary>
+    public const string ClaudeCommandName = "/claude";
+
     private readonly IDalamudPluginInterface pluginInterface;
     private readonly IPluginLog log;
     private readonly IFramework framework;
@@ -31,9 +35,13 @@ public sealed class Plugin : IDalamudPlugin
     private readonly LauncherWindow launcher = null!;
     private readonly PaletteWindow palette = null!;
     private readonly SettingsWindow settings = null!;
+    private readonly ClaudeWindow claudePanel = null!;
+    private readonly ClaudePermissionWindow claudePermission = null!;
+    private readonly ClaudeService claude = null!;
     private readonly INotificationManager notifications;
     private readonly AskModule? ask;
     private bool commandRegistered;
+    private bool claudeCommandRegistered;
 
     public Plugin(
         IDalamudPluginInterface pluginInterface,
@@ -73,9 +81,27 @@ public sealed class Plugin : IDalamudPlugin
             var keybinds = Track(new KeybindService(framework, keys, log, config, action => OnKey(runner, action), () => ghostty.KeyboardFocus is { Id: > 0 }));
             ghostty.AgentAppsChanged += catalog.SetAgentApps;
             settings = new SettingsWindow(config, desktop, session, keybinds);
+
+            // Claude in game: the agent connection, the permission server, the panel and the NPC bridge.
+            claude = Track(new ClaudeService(
+                log,
+                framework,
+                config,
+                () => pluginInterface.SavePluginConfig(config),
+                catalog.CurrentPaths(),
+                () => catalog.CurrentPaths().LinuxHome));
+            claude.UseAvatar(Track(new ClaudeAvatars(framework, objects, log, () => config.ClaudeNpc)));
+            claudePanel = new ClaudeWindow(claude, config, () => pluginInterface.SavePluginConfig(config));
+            claudePermission = new ClaudePermissionWindow(claude);
+            runner.Claude = claude;
+            runner.ShowClaude = claudePanel.Show;
+            settings.Claude = claude;
+
             windowSystem.AddWindow(launcher);
             windowSystem.AddWindow(palette);
             windowSystem.AddWindow(settings);
+            windowSystem.AddWindow(claudePanel);
+            windowSystem.AddWindow(claudePermission);
             pluginInterface.UiBuilder.Draw += DrawUi;
             pluginInterface.UiBuilder.OpenMainUi += OpenMainUi;
             pluginInterface.UiBuilder.OpenConfigUi += OpenConfigUi;
@@ -85,6 +111,11 @@ public sealed class Plugin : IDalamudPlugin
                 HelpMessage = "Toggle the launcher palette. \"/desktop apps\" (app grid), \"/desktop settings\", \"/desktop ws <1-9>\", \"/desktop windows\", \"/desktop launch <app>\", \"/desktop reload\", \"/desktop status\", \"/desktop <query>\".",
             });
 
+            claudeCommandRegistered = commands.AddHandler(ClaudeCommandName, new CommandInfo(OnClaudeCommand)
+            {
+                HelpMessage = "Open the Claude panel. \"/claude <prompt>\" asks, \"/claude new [name]\", \"/claude list\", "
+                    + "\"/claude resume [name]\", \"/claude <name> <prompt>\", \"/claude stop\", \"/claude end [name]\", \"/claude look [name] [seed]\".",
+            });
             // Ask an NPC: /ask, XivDesktop.v1.Ask, the summoned speaker and its dialogue (Ask/).
             ask = Track(new AskModule(pluginInterface, framework, commands, chat, log, data, clientState, condition, objects, textures,
                 windowSystem, config, () => ghostty.Post.Available, line => ghostty.Post.Post(line)));
@@ -113,6 +144,7 @@ public sealed class Plugin : IDalamudPlugin
     {
         try
         {
+            claudePermission.Sync();
             windowSystem.Draw();
 
             // "Always the in-game cursor": keep Dalamud from swapping it while over our windows.
@@ -207,6 +239,95 @@ public sealed class Plugin : IDalamudPlugin
         }
     }
 
+    /// <summary>
+    /// <c>/claude</c>. A bare command opens or focuses the panel; a verb is taken only when it is the
+    /// whole first word and is not the name of an open session, so "/claude new the parser" still asks
+    /// for a new session while "/claude widget fix the parser" talks to the session called widget.
+    /// </summary>
+    private void OnClaudeCommand(string command, string arguments)
+    {
+        try
+        {
+            var args = arguments.Trim();
+            if (args.Length == 0)
+            {
+                Print(claude.Focus());
+                claudePanel.Show();
+                return;
+            }
+
+            var space = args.IndexOf(' ');
+            var verb = (space < 0 ? args : args[..space]).ToLowerInvariant();
+            var rest = space < 0 ? "" : args[(space + 1)..].Trim();
+            var known = claude.Sessions.Any(s => string.Equals(s.Key, verb, StringComparison.OrdinalIgnoreCase));
+
+            switch (verb)
+            {
+                case "new" when !known:
+                    Print(claude.New(rest, ""));
+                    claudePanel.Show();
+                    return;
+                case "list" or "sessions" when !known:
+                    PrintClaudeSessions();
+                    return;
+                case "resume" when !known:
+                    if (rest.Length == 0)
+                        PrintClaudeSessions();
+                    else
+                        Print(claude.Resume(rest));
+                    claudePanel.Show();
+                    return;
+                case "stop" when !known:
+                    Print(claude.Stop(rest.Length > 0 ? rest : null));
+                    return;
+                case "end" or "dismiss" when !known:
+                    Print(claude.End(rest.Length > 0 ? rest : null));
+                    return;
+                case "look" when !known:
+                    var parts = rest.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+                    var name = parts.Length > 0 && !uint.TryParse(parts[0], out _) ? parts[0] : null;
+                    var seed = parts.Length > 0 && uint.TryParse(parts[^1], out var s) ? s : 0u;
+                    Print(claude.Look(name, seed));
+                    return;
+                case "status" when !known:
+                    Print(claude.Status());
+                    return;
+                case "help" when !known:
+                    Print($"{ClaudeCommandName} opens the panel; {ClaudeCommandName} <prompt> asks; new, list, resume, stop, end, look, status.");
+                    return;
+            }
+
+            // "/claude <name> <prompt>" when the first word names an open session; otherwise the whole
+            // line is the prompt for the session on screen.
+            Print(known && rest.Length > 0 ? claude.Send(verb, rest) : claude.Send(null, args));
+            claudePanel.Show();
+        }
+        catch (Exception ex)
+        {
+            log.Error(ex, "{Command} failed", ClaudeCommandName);
+        }
+    }
+
+    private void PrintClaudeSessions()
+    {
+        var open = claude.Sessions;
+        var remembered = claude.Remembered;
+        if (open.Count == 0 && remembered.Count == 0)
+        {
+            Print($"no Claude sessions; {ClaudeCommandName} new");
+            return;
+        }
+
+        if (open.Count > 0)
+        {
+            Print("open: " + string.Join("; ", open.Select(s =>
+                $"{s.Key} [{(s.Live ? s.Conversation.Activity.ToString().ToLowerInvariant() : "ended")}] {s.Look.Nameplate}")));
+        }
+
+        if (remembered.Count > 0)
+            Print("remembered: " + string.Join("; ", remembered.Take(8).Select(r => $"{r.Key} ({r.Summary(DateTimeOffset.UtcNow)})")));
+    }
+
     private void PrintWindows()
     {
         var list = session.OpenPanels();
@@ -244,6 +365,12 @@ public sealed class Plugin : IDalamudPlugin
         {
             commands.RemoveHandler(Command);
             commandRegistered = false;
+        }
+
+        if (claudeCommandRegistered)
+        {
+            commands.RemoveHandler(ClaudeCommandName);
+            claudeCommandRegistered = false;
         }
 
         pluginInterface.UiBuilder.Draw -= DrawUi;

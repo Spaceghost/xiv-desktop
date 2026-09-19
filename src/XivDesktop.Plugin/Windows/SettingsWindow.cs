@@ -55,6 +55,12 @@ public sealed class SettingsWindow : Window
             ImGui.EndTabItem();
         }
 
+        if (claude != null && ImGui.BeginTabItem("Claude"))
+        {
+            ClaudeTab();
+            ImGui.EndTabItem();
+        }
+
         if (AskTab is not null && ImGui.BeginTabItem("Ask"))
         {
             AskTab();
@@ -62,6 +68,153 @@ public sealed class SettingsWindow : Window
         }
 
         ImGui.EndTabBar();
+    }
+
+    /// <summary>Set once the Claude sessions are wired up; without it the tab is not shown.</summary>
+    public Claude.ClaudeService? Claude
+    {
+        get => claude;
+        set => claude = value;
+    }
+
+    private Claude.ClaudeService? claude;
+
+    /// <summary>The /claude settings: the agent, where sessions run, the model, permissions and the NPC.</summary>
+    private void ClaudeTab()
+    {
+        if (claude == null)
+            return;
+        var changed = false;
+
+        var enabled = config.ClaudeEnabled;
+        if (ImGui.Checkbox("Enable /claude", ref enabled))
+        {
+            config.ClaudeEnabled = enabled;
+            changed = true;
+        }
+
+        var status = claude.Status();
+        ImGui.TextColored(status.StartsWith("error", StringComparison.Ordinal) ? ImGuiColors.DalamudOrange : ImGuiColors.HealerGreen,
+            status[(status.IndexOf(':') + 1)..].Trim());
+
+        ImGui.Separator();
+        ImGui.TextColored(ImGuiColors.DalamudGrey, "ghostty-agent");
+        var host = config.ClaudeAgentHost;
+        if (ImGui.InputTextWithHint("Host", "127.0.0.1", ref host, 128))
+        {
+            config.ClaudeAgentHost = host;
+            changed = true;
+        }
+
+        var port = config.ClaudeAgentPort;
+        if (ImGui.InputInt("Port (0 = 7777)", ref port))
+        {
+            config.ClaudeAgentPort = Math.Clamp(port, 0, 65535);
+            changed = true;
+        }
+
+        var tokenPath = config.ClaudeTokenPath;
+        if (ImGui.InputTextWithHint("Token file", "~/.config/ghostty-agent/token", ref tokenPath, 512))
+        {
+            config.ClaudeTokenPath = tokenPath;
+            changed = true;
+        }
+
+        ImGui.TextColored(ImGuiColors.DalamudGrey, "The token is read only to authenticate and is never logged or stored here.");
+
+        ImGui.Separator();
+        ImGui.TextColored(ImGuiColors.DalamudGrey, "Sessions");
+        var cwd = config.ClaudeWorkingDirectory;
+        if (ImGui.InputTextWithHint("Working directory", claude.WorkingDirectory(), ref cwd, 512))
+        {
+            config.ClaudeWorkingDirectory = cwd;
+            changed = true;
+        }
+
+        ImGui.TextColored(ImGuiColors.DalamudGrey, "This decides what Claude can touch. The panel's button lists the repositories under your home.");
+
+        var model = config.ClaudeModel;
+        if (ImGui.InputTextWithHint("Model", "account default", ref model, 128))
+        {
+            config.ClaudeModel = model;
+            changed = true;
+        }
+
+        var executable = config.ClaudeExecutable;
+        if (ImGui.InputTextWithHint("claude executable", "claude", ref executable, 512))
+        {
+            config.ClaudeExecutable = executable;
+            changed = true;
+        }
+
+        var extra = config.ClaudeExtraArgs;
+        if (ImGui.InputTextWithHint("Extra arguments", "appended verbatim", ref extra, 512))
+        {
+            config.ClaudeExtraArgs = extra;
+            changed = true;
+        }
+
+        var partials = config.ClaudeStreamPartials;
+        if (ImGui.Checkbox("Stream replies as they are written", ref partials))
+        {
+            config.ClaudeStreamPartials = partials;
+            changed = true;
+        }
+
+        ImGui.Separator();
+        ImGui.TextColored(ImGuiColors.DalamudGrey, "Permissions");
+        ImGui.TextWrapped(claude.PermissionSummary);
+
+        var mode = config.ClaudePermissionMode;
+        if (ImGui.InputTextWithHint("Fallback permission mode", "manual", ref mode, 64))
+        {
+            config.ClaudePermissionMode = mode;
+            changed = true;
+        }
+
+        ImGui.TextColored(ImGuiColors.DalamudGrey, "Used only when prompts cannot be shown in game. Anything that would still have prompted is denied.");
+
+        var always = config.ClaudeAlwaysAllow;
+        ImGui.TextUnformatted(always.Count == 0 ? "No tool is set to always allow." : "Always allowed: " + string.Join(", ", always));
+        if (always.Count > 0 && ImGui.Button("Forget them"))
+        {
+            claude.Rules.ClearAlways();
+            config.ClaudeAlwaysAllow = [];
+            changed = true;
+        }
+
+        ImGui.Separator();
+        ImGui.TextColored(ImGuiColors.DalamudGrey, "NPC");
+        var npc = config.ClaudeNpc;
+        if (ImGui.Checkbox("Summon an NPC beside me for each session", ref npc))
+        {
+            config.ClaudeNpc = npc;
+            changed = true;
+        }
+
+        var ask = config.ClaudeAskForLook;
+        if (ImGui.Checkbox("Ask the model once for its own name and look", ref ask))
+        {
+            config.ClaudeAskForLook = ask;
+            changed = true;
+        }
+
+        if (!claude.NpcAvailable)
+            ImGui.TextColored(ImGuiColors.DalamudGrey, "Nothing here can put an avatar in the world yet; the panel works without one.");
+
+        if (config.ClaudeSessions.Count > 0)
+        {
+            ImGui.Separator();
+            ImGui.TextColored(ImGuiColors.DalamudGrey, $"{config.ClaudeSessions.Count} remembered sessions");
+            if (ImGui.Button("Forget all remembered sessions"))
+            {
+                config.ClaudeSessions = [];
+                changed = true;
+            }
+        }
+
+        if (changed)
+            desktop.Save();
     }
 
     private void General()

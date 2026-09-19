@@ -79,6 +79,27 @@ edits Dalamud's configuration and never copies anything into `~/.xlcore`.
 | `/desktop launch <id or search>` | launch an app by desktop-file id (`org.gnome.TextEditor`), exact name, or best search match |
 | `/desktop reload` | rescan the application directories (runs off the framework thread) |
 | `/desktop status` | one line: app count, and whether ghostty-dalamud is there |
+| `/claude` | open or focus the Claude panel |
+| `/claude <prompt>` | ask the session on screen (starting one if there is none) |
+| `/claude new [name]` | a fresh session, with its own NPC, panel tab and working directory |
+| `/claude list` | the open sessions and the remembered ones, in chat |
+| `/claude resume [name]` | resume a remembered session (`--resume <session-id>`) |
+| `/claude <name> <prompt>` | ask a named session |
+| `/claude stop` | interrupt the turn in flight (the session keeps running) |
+| `/claude end [name]` | end a session for good and dismiss its NPC |
+| `/claude look [name] [seed]` | reroll that Claude's appearance |
+
+**Claude in game.** `/claude` is a Claude Code session whose activity is rendered as game UI rather than
+terminal text: replies stream in, and every tool call is a card with an icon for its kind, the file or
+command it names, a spinner, and a result line (`+12 −3`, `exit 0 · 14 lines`, `14 matches`) that expands
+to a few lines of detail. A **raw** toggle shows the job's output exactly as a terminal would. Permission
+prompts become a native dialog — *Allow once / Allow for this session / Always for this tool / Deny* —
+with the tool's arguments listed. Sessions run as ghostty-agent jobs opened with the *keep* flag, so they
+survive a reload, a crash or a restart and are re-attached automatically. Super+D gets a `claude <prompt>`
+row and a row per session. Each session also stands beside you as its own NPC, with a look rolled
+deterministically from its name (and the model asked once for its own), summoned with the same
+client-side spawner and follow behaviour as `/npc`. See **[docs/CLAUDE_IN_GAME.md](docs/CLAUDE_IN_GAME.md)**
+— including what is not implemented. **Nothing here has been observed running in the game.**
 
 The app grid (`/desktop apps`, or *App grid* in the palette) has a search box (focused when the window
 opens), the favourites and recent rows (shown while the search is empty), and an icon grid. **Up/Down** move by row. **Left/Right** move by one while the search
