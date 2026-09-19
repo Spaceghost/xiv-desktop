@@ -78,9 +78,10 @@ public class SearchAndListsTests
     [Fact]
     public void LaunchPlanRefusesTerminalApps()
     {
-        Assert.Equal("window pull run firefox", LaunchPlan.For(Apps[1]).Line);
-        var (line, error) = LaunchPlan.For(Apps[1] with { Terminal = true });
-        Assert.Null(line);
+        Assert.Equal("firefox", LaunchPlan.For(Apps[1]).Command);
+        Assert.Equal("window pull run firefox", LaunchPlan.PostLine("firefox"));
+        var (command, error) = LaunchPlan.For(Apps[1] with { Terminal = true });
+        Assert.Null(command);
         Assert.Contains("Terminal=true", error);
         Assert.NotNull(LaunchPlan.For(Apps[1] with { Command = "a '\n'" }).Error);
     }
