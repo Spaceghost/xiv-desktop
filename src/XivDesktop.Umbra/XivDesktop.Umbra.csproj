@@ -1,0 +1,98 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Project Sdk="Microsoft.NET.Sdk">
+  <!--
+    Umbra custom plugin (loaded by Umbra from a DLL path, not by Dalamud).
+    It has NO assembly reference to XivDesktop: everything goes through Dalamud IPC
+    as described in src/Shared/IpcContract.cs. The search code from XivDesktop.Core is
+    compiled in (source link), because Umbra loads a single DLL.
+
+    Reference paths:
+      DalamudLibPath  default ~/.xlcore/dalamud/Hooks/dev/ (Windows: %APPDATA%\XIVLauncher\addon\Hooks\dev\)
+      UmbraLibPath    default: newest version directory under the installed Umbra plugin
+                      (~/.xlcore/installedPlugins/Umbra/<version>/), resolved at build time.
+    Override either with -p:DalamudLibPath=... / -p:UmbraLibPath=... (trailing slash required).
+  -->
+  <PropertyGroup>
+    <TargetFramework>net10.0-windows</TargetFramework>
+    <Platforms>x64</Platforms>
+    <PlatformTarget>x64</PlatformTarget>
+    <EnableWindowsTargeting>true</EnableWindowsTargeting>
+    <AllowUnsafeBlocks>false</AllowUnsafeBlocks>
+    <ProduceReferenceAssembly>false</ProduceReferenceAssembly>
+    <GenerateDocumentationFile>false</GenerateDocumentationFile>
+    <CopyLocalLockFileAssemblies>false</CopyLocalLockFileAssemblies>
+    <RootNamespace>Umbra.XivDesktop</RootNamespace>
+    <AssemblyName>Umbra.XivDesktop</AssemblyName>
+    <Version>0.1.0.0</Version>
+    <Authors>xiv-desktop contributors</Authors>
+    <Description>Umbra toolbar "Apps" launcher for the XivDesktop plugin (talks to it over Dalamud IPC).</Description>
+    <IsPackable>false</IsPackable>
+    <DebugType>portable</DebugType>
+  </PropertyGroup>
+
+  <PropertyGroup>
+    <XlCoreDir Condition="'$(XlCoreDir)' == '' And '$(OS)' != 'Windows_NT'">$(HOME)/.xlcore/</XlCoreDir>
+    <DalamudLibPath Condition="'$(DalamudLibPath)' == '' And '$(OS)' != 'Windows_NT'">$(XlCoreDir)dalamud/Hooks/dev/</DalamudLibPath>
+    <DalamudLibPath Condition="'$(DalamudLibPath)' == '' And '$(OS)' == 'Windows_NT'">$(APPDATA)\XIVLauncher\addon\Hooks\dev\</DalamudLibPath>
+    <UmbraPluginRoot Condition="'$(UmbraPluginRoot)' == '' And '$(OS)' != 'Windows_NT'">$(XlCoreDir)installedPlugins/Umbra/</UmbraPluginRoot>
+    <UmbraPluginRoot Condition="'$(UmbraPluginRoot)' == '' And '$(OS)' == 'Windows_NT'">$(APPDATA)\XIVLauncher\installedPlugins\Umbra\</UmbraPluginRoot>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Compile Include="..\Shared\IpcContract.cs" Link="Shared\IpcContract.cs" />
+    <Compile Include="..\XivDesktop.Core\DesktopEntry.cs" Link="Core\DesktopEntry.cs" />
+    <Compile Include="..\XivDesktop.Core\AppSearch.cs" Link="Core\AppSearch.cs" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Reference Include="Dalamud"><HintPath>$(DalamudLibPath)Dalamud.dll</HintPath><Private>false</Private></Reference>
+    <Reference Include="Dalamud.Bindings.ImGui"><HintPath>$(DalamudLibPath)Dalamud.Bindings.ImGui.dll</HintPath><Private>false</Private></Reference>
+    <Reference Include="FFXIVClientStructs"><HintPath>$(DalamudLibPath)FFXIVClientStructs.dll</HintPath><Private>false</Private></Reference>
+    <Reference Include="InteropGenerator.Runtime"><HintPath>$(DalamudLibPath)InteropGenerator.Runtime.dll</HintPath><Private>false</Private></Reference>
+    <Reference Include="Lumina"><HintPath>$(DalamudLibPath)Lumina.dll</HintPath><Private>false</Private></Reference>
+    <Reference Include="Lumina.Excel"><HintPath>$(DalamudLibPath)Lumina.Excel.dll</HintPath><Private>false</Private></Reference>
+  </ItemGroup>
+
+  <!--
+    Pick the highest Umbra version directory (System.Version ordering, so 3.1.18 beats 3.1.9)
+    and add the Umbra references from it. Runs before reference resolution.
+  -->
+  <UsingTask TaskName="XivDesktopFindNewestVersionDir" TaskFactory="RoslynCodeTaskFactory" AssemblyFile="$(MSBuildToolsPath)/Microsoft.Build.Tasks.Core.dll">
+    <ParameterGroup>
+      <Root ParameterType="System.String" Required="true" />
+      <Marker ParameterType="System.String" Required="true" />
+      <Result ParameterType="System.String" Output="true" />
+    </ParameterGroup>
+    <Task>
+      <Code Type="Fragment" Language="cs"><![CDATA[
+        Result = string.Empty;
+        if (System.IO.Directory.Exists(Root))
+        {
+            System.Version best = null;
+            foreach (var dir in System.IO.Directory.GetDirectories(Root))
+            {
+                System.Version v;
+                if (!System.Version.TryParse(System.IO.Path.GetFileName(dir), out v)) continue;
+                if (!System.IO.File.Exists(System.IO.Path.Combine(dir, Marker))) continue;
+                if (best == null || v > best) { best = v; Result = dir + System.IO.Path.DirectorySeparatorChar; }
+            }
+        }
+      ]]></Code>
+    </Task>
+  </UsingTask>
+
+  <Target Name="XivDesktopResolveUmbra" BeforeTargets="ResolveAssemblyReferences;CoreCompile">
+    <XivDesktopFindNewestVersionDir Condition="'$(UmbraLibPath)' == ''" Root="$(UmbraPluginRoot)" Marker="Umbra.dll">
+      <Output TaskParameter="Result" PropertyName="UmbraLibPath" />
+    </XivDesktopFindNewestVersionDir>
+    <Error Condition="'$(UmbraLibPath)' == '' Or !Exists('$(UmbraLibPath)Umbra.dll')"
+           Text="Umbra not found (looked in '$(UmbraPluginRoot)'). Install Umbra through Dalamud or pass -p:UmbraLibPath=/path/to/Umbra/&lt;version&gt;/" />
+    <Message Importance="high" Text="XivDesktop.Umbra: Umbra references from $(UmbraLibPath)" />
+    <ItemGroup>
+      <Reference Include="Umbra"><HintPath>$(UmbraLibPath)Umbra.dll</HintPath><Private>false</Private></Reference>
+      <Reference Include="Umbra.Common"><HintPath>$(UmbraLibPath)Umbra.Common.dll</HintPath><Private>false</Private></Reference>
+      <Reference Include="Umbra.Game"><HintPath>$(UmbraLibPath)Umbra.Game.dll</HintPath><Private>false</Private></Reference>
+      <Reference Include="Una.Drawing"><HintPath>$(UmbraLibPath)Una.Drawing.dll</HintPath><Private>false</Private></Reference>
+    </ItemGroup>
+  </Target>
+</Project>
