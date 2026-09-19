@@ -14,6 +14,12 @@
         "resolved": "1.2.39",
         "contentHash": "fcFN01tDTIQqDuTwr1jUQK/geofiwjG5DycJQOnC72i1SsLAk1ELe+apBOuZ11UMQG8YKFZG1FgvjZPbqHyatg=="
       },
+      "KamiToolKit": {
+        "type": "Direct",
+        "requested": "[2.2.48, )",
+        "resolved": "2.2.48",
+        "contentHash": "pJq+gn0GR+H1qe2tZb7gTKV2r402oYpmpWnBsW/Se3sm63LxELPoUt5brP2z5x7VYdgbiqJntF1HR21ochNhfw=="
+      },
       "xivdesktop.core": {
         "type": "Project"
       }

@@ -173,9 +173,11 @@ public sealed class SpeakerCatalog
                 continue;
             if (Fuzzy.Match(e.SearchText, query) is not { } m)
                 continue;
-            var score = m.Score + (fav.Contains(e.Key) ? 0.5 : 0) + (e.Location.Length > 0 ? 0.05 : 0);
+            // Fuzzy scores sit around 100, so the bonuses are on that scale: a favourite outranks a
+            // slightly better textual match, and a row with a known location wins a tie with one without.
+            var score = m.Score + (fav.Contains(e.Key) ? 25 : 0) + (e.Location.Length > 0 ? 2 : 0);
             if (string.Equals(e.Name, query, StringComparison.OrdinalIgnoreCase))
-                score += 1;
+                score += 40;
             scored.Add((e, score));
         }
 
