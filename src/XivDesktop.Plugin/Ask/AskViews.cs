@@ -3,6 +3,7 @@ using Dalamud.Bindings.ImGui;
 using Dalamud.Interface.Textures;
 using Dalamud.Interface.Windowing;
 using Dalamud.Plugin.Services;
+using XivDesktop.Shared;
 
 namespace XivDesktop.Plugin.Ask;
 
@@ -102,7 +103,8 @@ public sealed class ImGuiTalkWindow : Window, IAskView
     private string speaker = "";
     private string input = "";
     private bool focus;
-    private bool setCursorFlag;
+
+    private const string CursorSource = "ask";
 
     public ImGuiTalkWindow(ITextureProvider textures)
         : base("###XivDesktopAskFallback", ImGuiWindowFlags.NoTitleBar | ImGuiWindowFlags.NoScrollbar | ImGuiWindowFlags.NoBackground | ImGuiWindowFlags.NoSavedSettings)
@@ -195,28 +197,9 @@ public sealed class ImGuiTalkWindow : Window, IAskView
         if (ImGui.IsItemActive() && ImGui.IsKeyPressed(ImGuiKey.Escape))
             Dismissed?.Invoke();
 
-        // Keep the game's cursor while hovering (the user's rule): set the flag only while hovered, clear it only if we set it.
-        var io = ImGui.GetIO();
-        var hovered = ImGui.IsWindowHovered(ImGuiHoveredFlags.RootAndChildWindows | ImGuiHoveredFlags.AllowWhenBlockedByActiveItem);
-        if (hovered && (io.ConfigFlags & ImGuiConfigFlags.NoMouseCursorChange) == 0)
-        {
-            io.ConfigFlags |= ImGuiConfigFlags.NoMouseCursorChange;
-            setCursorFlag = true;
-        }
-        else if (!hovered && setCursorFlag)
-        {
-            io.ConfigFlags &= ~ImGuiConfigFlags.NoMouseCursorChange;
-            setCursorFlag = false;
-        }
+        // Keep the game's own cursor while hovering (never SetMouseCursor): the shared helper owns the flag.
+        GameCursor.Update(CursorSource, ImGui.IsWindowHovered(ImGuiHoveredFlags.RootAndChildWindows | ImGuiHoveredFlags.AllowWhenBlockedByActiveItem));
     }
 
-    public override void OnClose()
-    {
-        if (setCursorFlag)
-        {
-            var io = ImGui.GetIO();
-            io.ConfigFlags &= ~ImGuiConfigFlags.NoMouseCursorChange;
-            setCursorFlag = false;
-        }
-    }
+    public override void OnClose() => GameCursor.Update(CursorSource, false);
 }
