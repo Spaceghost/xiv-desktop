@@ -103,6 +103,12 @@ public sealed class Plugin : IDalamudPlugin
         try
         {
             windowSystem.Draw();
+
+            // "Always the in-game cursor": keep Dalamud from swapping it while over our windows.
+            var over = false;
+            foreach (var w in windowSystem.Windows)
+                over |= w.IsOpen && w.IsHovered;
+            XivDesktop.Shared.GameCursor.Update("windows", over);
         }
         catch (Exception ex)
         {
@@ -230,6 +236,7 @@ public sealed class Plugin : IDalamudPlugin
         pluginInterface.UiBuilder.OpenMainUi -= OpenMainUi;
         pluginInterface.UiBuilder.OpenConfigUi -= OpenConfigUi;
         windowSystem.RemoveAllWindows();
+        XivDesktop.Shared.GameCursor.Release();
 
         for (var i = disposables.Count - 1; i >= 0; i--)
         {
