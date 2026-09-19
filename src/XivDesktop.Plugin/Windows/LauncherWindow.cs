@@ -10,7 +10,7 @@ using XivDesktop.Plugin.Services;
 namespace XivDesktop.Plugin.Windows;
 
 /// <summary>
-/// The /desktop launcher: search box (focused on open), favourites and recents rows, and an icon grid.
+/// The app grid (/desktop apps; the palette is /desktop): search box (focused on open), favourites and recents rows, and an icon grid.
 /// Arrow keys move the selection, Enter launches it, right-click toggles a favourite. Icon textures are
 /// requested only for cells that are on screen; Dalamud's shared texture cache drops unused ones.
 /// </summary>
@@ -35,7 +35,7 @@ public sealed class LauncherWindow : Window
     private DateTime flashUntil;
 
     public LauncherWindow(DesktopService desktop, ITextureProvider textures, Configuration config)
-        : base("XivDesktop###XivDesktopLauncher")
+        : base("XivDesktop apps###XivDesktopLauncher")
     {
         this.desktop = desktop;
         this.textures = textures;
@@ -309,29 +309,7 @@ public sealed class LauncherWindow : Window
     private static bool CanLaunch(AppInfo app, bool available) => available && !app.Terminal;
 
     private void DrawIcon(ImDrawListPtr draw, AppInfo app, Vector2 pos, float size, bool dimmed)
-    {
-        var max = pos + new Vector2(size, size);
-        var tint = dimmed ? 0x80FFFFFFu : 0xFFFFFFFFu;
-        if (app.IconPath is { } path)
-        {
-            var wrap = textures.GetFromFile(path).GetWrapOrDefault();
-            if (wrap != null)
-            {
-                draw.AddImage(wrap.Handle, pos, max, Vector2.Zero, Vector2.One, tint);
-                return;
-            }
-        }
-
-        var color = LetterTile.Color(app.Id);
-        if (dimmed)
-            color = (color & 0x00FFFFFFu) | 0x80000000u;
-        draw.AddRectFilled(pos, max, color, size * 0.18f);
-        var letter = LetterTile.Letter(app.Name);
-        var font = ImGui.GetFont();
-        var fontSize = size * 0.55f;
-        var textSize = ImGui.CalcTextSize(letter) * (fontSize / ImGui.GetFontSize());
-        draw.AddText(font, fontSize, pos + ((new Vector2(size) - textSize) / 2), tint, letter);
-    }
+        => IconDrawer.App(textures, draw, app, pos, size, dimmed);
 
     private static string Fit(string text, float width)
     {

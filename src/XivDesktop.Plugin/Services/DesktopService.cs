@@ -35,6 +35,9 @@ public sealed class DesktopService
 
     public IReadOnlyList<string> Recents => config.Recents;
 
+    /// <summary>Panel id → desktop-file id, for panels this plugin launched through the Call gate.</summary>
+    public System.Collections.Concurrent.ConcurrentDictionary<long, string> LaunchedApps { get; } = new();
+
     public string? LastLaunch { get; private set; }
 
     public string? LastError { get; private set; }
@@ -61,7 +64,18 @@ public sealed class DesktopService
 
         var task = framework.RunOnFrameworkThread(() =>
         {
-            Backend.Launch(command);
+            if (Backend is IWindowManager { WindowsAvailable: true } windows)
+            {
+                // Through the Call gate the new panel's id comes back, so its icon is known for sure.
+                var result = windows.Open(run: command, onPanel: panel => LaunchedApps[panel] = app.Id);
+                if (result.StartsWith("error", StringComparison.Ordinal))
+                    throw new InvalidOperationException(result[7..]);
+            }
+            else
+            {
+                Backend.Launch(command);
+            }
+
             config.Recents = UserLists.PushRecent(config.Recents, app.Id);
             Save();
             LastLaunch = $"{app.Name} ({app.Id}) at {DateTime.Now:HH:mm:ss}";
