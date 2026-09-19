@@ -7,6 +7,8 @@
 
 | Project | Output | Depends on | Role |
 | --- | --- | --- | --- |
+| `src/XivDesktop.Core` | `XivDesktop.Core.dll` (net10.0) | BCL only | `.desktop` parsing, Exec → sh, visibility rules, icon lookup, search, favourites/recents, launch validation; v1: `Windows/` (ghostty Call JSON, window diff, window → app), `Input/` (chords, defaults, edge tracker), `Workspaces/`, `Palette/` (fuzzy, calculator, providers); `Claude/` (agent job frames, stream-json → cards, permission state, sessions, NPC looks). Pure and host-tested. |
+| `src/XivDesktop.Plugin` | `XivDesktop.dll` (Dalamud.NET.Sdk 15) | Core, Dalamud API 15 | Catalog, ghostty backends, session (workspaces, notifications), key chords, palette, app grid, settings, IPC provider; `Claude/` (the agent connection, the permission MCP server, the sessions and the NPC bridge). |
 | `src/XivDesktop.Core` | `XivDesktop.Core.dll` (net10.0) | BCL only | `Ask/` (SSE parsing, transcript, cue tags, emote whitelist, text reveal, follow math, speaker catalog); `.desktop` parsing, Exec → sh, visibility rules, icon lookup, search, favourites/recents, launch validation; v1: `Windows/` (ghostty Call JSON, window diff, window → app), `Input/` (chords, defaults, edge tracker), `Workspaces/`, `Palette/` (fuzzy, calculator, providers). Pure and host-tested. |
 | `src/XivDesktop.Plugin` | `XivDesktop.dll` (Dalamud.NET.Sdk 15) | Core, Dalamud API 15 | Catalog, ghostty backends, session (workspaces, notifications), key chords, palette, app grid, settings, IPC provider. |
 | `src/XivDesktop.Umbra` | `Umbra.XivDesktop.dll` | Umbra, IPC contract, three Core source files | "Apps" and "Windows" toolbar widgets. Talk to the plugin only over IPC. |
@@ -88,6 +90,16 @@ sent no apps yet. Without them it falls back to the v1 behaviour.
 Still open: panel focus takes the keyboard, so the chords only work then with *Read keys globally* (and the
 keys reach the app too). Rather than `window.focus {"keyboard": false}`, the better fix would be ghostty
 leaving configured chords (e.g. every Super chord) out of what it forwards to a focused panel.
+
+## Claude in game
+
+`/claude` is the one part of XivDesktop that talks to **ghostty-agent directly** rather than through
+ghostty-dalamud's `Call` gate: a Claude Code session is an agent *job* (protocol version 4 — pipes, not a
+pseudo console), because its output is parsed into game UI rather than drawn as a terminal. The whole
+transport sits behind `IJobTransport`, and the rendering, permissions, sessions and NPC looks are pure
+Core code. The permission prompts come back the other way, over an MCP server the plugin hosts on the
+loopback address. See **[CLAUDE_IN_GAME.md](CLAUDE_IN_GAME.md)** for the protocol, the confirmed
+permission contract and what is not implemented.
 
 ## Later
 

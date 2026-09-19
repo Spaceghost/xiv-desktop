@@ -60,6 +60,9 @@ public sealed record PaletteCommand(string Kind, string Arg = "", long Id = 0, i
     public const string TogglePet = "toggle-pet"; // Id: panel
     public const string Minimize = "minimize"; // Id: panel
     public const string Order = "order";       // Id: panel, Arg: left | right | first | last | N
+    public const string Claude = "claude";     // Arg: a prompt for a new or focused session
+    public const string ClaudeSession = "claude-session"; // Arg: an open session's name; focuses its panel
+    public const string ClaudeResume = "claude-resume";   // Arg: a remembered session's name or id
 }
 
 /// <summary>A keyboard action on a palette row: its label, its chord, and what it runs.</summary>
@@ -139,6 +142,18 @@ public sealed record PaletteContext
 
     /// <summary>Launching and window changes are possible (ghostty-dalamud present).</summary>
     public bool GhosttyAvailable { get; init; } = true;
+
+    /// <summary>Open Claude sessions: their name, and a line about what each is doing.</summary>
+    public IReadOnlyList<(string Name, string Subtitle)> ClaudeSessions { get; init; } = [];
+
+    /// <summary>Remembered Claude sessions that can be resumed: their name or id, and a summary.</summary>
+    public IReadOnlyList<(string Name, string Subtitle)> ClaudeRecent { get; init; } = [];
+
+    /// <summary>A Claude session can be started or talked to at all.</summary>
+    public bool ClaudeAvailable { get; init; }
+
+    /// <summary>Why not, when it is not.</summary>
+    public string? ClaudeReason { get; init; }
 
     /// <summary>The window list is available (ghostty's Call gate, not only Post).</summary>
     public bool WindowsAvailable { get; init; } = true;
@@ -418,6 +433,9 @@ public static class PaletteEngine
             });
         }
 
+        // "claude <prompt>": a Claude Code session in game, and a row per open or remembered session.
+        ClaudeRows(items, ctx, text, forced);
+
         // "ask <question>": the assistant terminal, as /ask does.
         var askText = text.StartsWith("/ask ", StringComparison.OrdinalIgnoreCase) ? text[5..] : text.StartsWith("ask ", StringComparison.OrdinalIgnoreCase) ? text[4..] : null;
         if (askText is { } question && question.Trim().Length > 0)
@@ -472,6 +490,79 @@ public static class PaletteEngine
                 Enabled = ctx.GhosttyAvailable,
                 Reason = ctx.GhosttyAvailable ? null : "needs ghostty-dalamud",
             });
+        }
+    }
+
+    /// <summary>
+    /// The Claude rows: "claude &lt;prompt&gt;" sends one, and each open or remembered session gets a row
+    /// so Super+D reaches it without typing a command.
+    /// </summary>
+    private static void ClaudeRows(List<PaletteItem> items, PaletteContext ctx, string text, bool forced)
+    {
+        var reason = ctx.ClaudeAvailable ? null : ctx.ClaudeReason ?? "needs ghostty-agent with jobs";
+
+        var typed = text.StartsWith("/claude ", StringComparison.OrdinalIgnoreCase) ? text[8..]
+            : text.StartsWith("claude ", StringComparison.OrdinalIgnoreCase) ? text[7..]
+            : null;
+        if (typed is { } prompt && prompt.Trim().Length > 0)
+        {
+            items.Add(new PaletteItem
+            {
+                Provider = PaletteProvider.Command,
+                Title = $"Claude: {prompt.Trim()}",
+                Subtitle = "Ask the Claude session in game",
+                BadgeText = "Claude",
+                Score = 960,
+                Command = new PaletteCommand(PaletteCommand.Claude, prompt.Trim()),
+                Enabled = ctx.ClaudeAvailable,
+                Reason = reason,
+            });
+        }
+
+        foreach (var (name, subtitle) in ctx.ClaudeSessions)
+        {
+            var title = "Claude · " + name;
+            var score = Score(title, name);
+            if (score == null)
+                continue;
+            items.Add(new PaletteItem
+            {
+                Provider = PaletteProvider.Command,
+                Title = title,
+                Subtitle = subtitle,
+                BadgeText = "Claude",
+                Score = score.Value.Score,
+                Highlights = score.Value.Positions,
+                Command = new PaletteCommand(PaletteCommand.ClaudeSession, name),
+            });
+        }
+
+        foreach (var (name, subtitle) in ctx.ClaudeRecent)
+        {
+            var title = "Resume Claude · " + name;
+            var score = Score(title, name);
+            if (score == null)
+                continue;
+            items.Add(new PaletteItem
+            {
+                Provider = PaletteProvider.Command,
+                Title = title,
+                Subtitle = subtitle,
+                BadgeText = "Claude",
+                Score = score.Value.Score * 0.8,
+                Highlights = score.Value.Positions,
+                Command = new PaletteCommand(PaletteCommand.ClaudeResume, name),
+                Enabled = ctx.ClaudeAvailable,
+                Reason = reason,
+            });
+        }
+
+        (double Score, int[] Positions)? Score(string title, string name)
+        {
+            if (text.Length == 0)
+                return forced ? (120, []) : null;
+            var match = Fuzzy.Match(title, text) ?? Fuzzy.Match(name, text);
+            return match == null ? null : (match.Score * 0.9, match.Positions);
         }
     }
 

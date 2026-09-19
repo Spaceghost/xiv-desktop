@@ -78,6 +78,52 @@ public sealed class Configuration : IPluginConfiguration
     /// <summary>The palette closes when it loses keyboard focus (Walker/Raycast style).</summary>
     public bool PaletteCloseOnFocusLoss { get; set; } = true;
 
+    // Claude in game -----------------------------------------------------------------------------
+
+    /// <summary>The /claude panel, the agent connection and the NPC are available at all.</summary>
+    public bool ClaudeEnabled { get; set; } = true;
+
+    /// <summary>ghostty-agent's address; empty means 127.0.0.1.</summary>
+    public string ClaudeAgentHost { get; set; } = "";
+
+    /// <summary>ghostty-agent's port; 0 means 7777.</summary>
+    public int ClaudeAgentPort { get; set; }
+
+    /// <summary>The agent's token file as a Linux path; empty means ~/.config/ghostty-agent/token.</summary>
+    public string ClaudeTokenPath { get; set; } = "";
+
+    /// <summary>Where a new session runs, as a Linux path. Empty means the home directory.</summary>
+    public string ClaudeWorkingDirectory { get; set; } = "";
+
+    /// <summary>Model alias for new sessions; empty leaves the account default.</summary>
+    public string ClaudeModel { get; set; } = "";
+
+    /// <summary>The claude executable on the agent's host; empty means "claude" on its PATH.</summary>
+    public string ClaudeExecutable { get; set; } = "";
+
+    /// <summary>
+    /// The permission mode used only when the prompt-tool route is unavailable. Nothing is auto-approved
+    /// beyond what this mode already allows, and the panel says so.
+    /// </summary>
+    public string ClaudePermissionMode { get; set; } = "manual";
+
+    /// <summary>Tools the player chose "always allow" for. The only permission choice that is persisted.</summary>
+    public List<string> ClaudeAlwaysAllow { get; set; } = [];
+
+    /// <summary>Remembered sessions, newest first (see SessionHistory).</summary>
+    public List<Core.Claude.SessionRecord> ClaudeSessions { get; set; } = [];
+
+    /// <summary>Ask the model, once per new session, for its own name and look.</summary>
+    public bool ClaudeAskForLook { get; set; } = true;
+
+    /// <summary>Stream replies as they are written (--include-partial-messages).</summary>
+    public bool ClaudeStreamPartials { get; set; } = true;
+
+    /// <summary>Summon an NPC beside the player for each session, when a spawner is available.</summary>
+    public bool ClaudeNpc { get; set; } = true;
+
+    /// <summary>Extra claude arguments, space separated, appended verbatim.</summary>
+    public string ClaudeExtraArgs { get; set; } = "";
     // Ask an NPC ---------------------------------------------------------------------------------
 
     /// <summary>
@@ -150,6 +196,15 @@ public sealed class Configuration : IPluginConfiguration
         config.TerminalProfile ??= "";
         config.TerminalPin = string.IsNullOrWhiteSpace(config.TerminalPin) ? "pet" : config.TerminalPin;
         config.CurrentWorkspace = Math.Clamp(config.CurrentWorkspace, 1, WorkspaceModel.Count);
+        config.ClaudeAlwaysAllow ??= [];
+        config.ClaudeSessions ??= [];
+        config.ClaudeAgentHost ??= "";
+        config.ClaudeTokenPath ??= "";
+        config.ClaudeWorkingDirectory ??= "";
+        config.ClaudeModel ??= "";
+        config.ClaudeExecutable ??= "";
+        config.ClaudeExtraArgs ??= "";
+        config.ClaudePermissionMode = string.IsNullOrWhiteSpace(config.ClaudePermissionMode) ? "manual" : config.ClaudePermissionMode;
         config.AskSpeaker ??= "";
         config.AskFavourites ??= [];
         config.AskRecents ??= [];

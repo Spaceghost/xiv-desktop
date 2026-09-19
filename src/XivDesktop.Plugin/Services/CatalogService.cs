@@ -72,6 +72,9 @@ public sealed class CatalogService : IDisposable
         });
     }
 
+    /// <summary>The Linux paths, and how this process reaches them, as the next scan would use them.</summary>
+    public HostPaths CurrentPaths() => Paths();
+
     private HostPaths Paths()
     {
         var home = homeOverride();
