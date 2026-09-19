@@ -20,6 +20,8 @@ public static class LaunchPlan
     /// </summary>
     public static (string? Command, string? Error) For(AppInfo app)
     {
+        if (app.AgentId != null)
+            return (null, $"{app.Name} is listed by ghostty-agent and needs ghostty-dalamud's window IPC to start.");
         if (app.Terminal)
             return (null, $"{app.Name} is a terminal application (Terminal=true); XivDesktop v0 does not launch those.");
         if (string.IsNullOrWhiteSpace(app.Command))
@@ -28,4 +30,40 @@ public static class LaunchPlan
             return (null, $"{app.Name}: the command contains a line break.");
         return (app.Command, null);
     }
+
+    /// <summary>
+    /// How <paramref name="app"/> starts, when ghostty-dalamud's Call gate is available: an agent app by its id,
+    /// a Terminal=true app as a command typed into a new world terminal, anything else as a run command.
+    /// </summary>
+    public static (LaunchTarget? Target, string? Error) Plan(AppInfo app)
+    {
+        if (app.AgentId is { } agentId)
+            return (new LaunchTarget(LaunchKind.AgentApp, agentId), null);
+        if (string.IsNullOrWhiteSpace(app.Command))
+            return (null, $"{app.Name} has no usable Exec= line.");
+        if (app.Command.Contains('\n') || app.Command.Contains('\r'))
+            return (null, $"{app.Name}: the command contains a line break.");
+        return (new LaunchTarget(app.Terminal ? LaunchKind.Terminal : LaunchKind.Run, app.Command), null);
+    }
+
+    /// <summary>
+    /// The /term line that types <paramref name="command"/> into terminal <paramref name="panelId"/> and presses
+    /// Enter. ghostty unescapes backslash sequences in send text, so backslashes are doubled.
+    /// </summary>
+    public static string SendLine(long panelId, string command) => $"send #{panelId} {command.Replace("\\", "\\\\", StringComparison.Ordinal)}";
 }
+
+public enum LaunchKind
+{
+    /// <summary>window.open {"run": command}: the agent starts it with sh -c.</summary>
+    Run,
+
+    /// <summary>window.open {"match": "app:ID"}: the agent starts its own listed app.</summary>
+    AgentApp,
+
+    /// <summary>terminal.new, then the command typed into it (/term send #ID command).</summary>
+    Terminal,
+}
+
+/// <summary>What to start: a shell command (Run, Terminal) or an agent app id (AgentApp).</summary>
+public sealed record LaunchTarget(LaunchKind Kind, string Value);

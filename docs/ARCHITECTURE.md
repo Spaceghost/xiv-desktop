@@ -72,25 +72,17 @@ That was v0. v1 uses ghostty-dalamud's JSON gate, `GhosttyDalamud.v1.Call`, when
 
 XivDesktop does not register `/window`; ghostty-dalamud owns it. Its own command stays `/desktop`.
 
-### What XivDesktop needs from ghostty-dalamud next
+### v1.1: ghostty-dalamud's newer methods
 
-Found while building v1 against the documented IPC; each is a request, none is implemented there:
+XivDesktop probes with `focus.get` every poll; when it answers, it uses `window.hide` for workspaces (and
+the `hidden` field of `window.list`), `window.toggle_pet` for Super+Space, `focus.cycle` for
+Super+Left/Right, `terminal.new` for Super+Enter and Terminal=true apps, `agent.apps` as the primary
+catalog (launched with `window.open {"match": "app:<id>"}`), and `agent.windows.refresh` while the agent has
+sent no apps yet. Without them it falls back to the v1 behaviour.
 
-1. **Hidden state in `window.list`**: a `"hidden": true` field. Workspaces hide panels with
-   `window.place {"pin": "hide"}` (`/term pin hide` in `lua/world.lua`), but the list still says
-   `"kind": "pet"|"pin"`, so XivDesktop can only track what it hid itself. A dedicated
-   `window.hide {"id": N, "hidden": true|false}` would also make this a documented use instead of a pin
-   argument.
-2. **Pin where it is**: `window.place {"id": N, "pin": "stay"}` (or similar) that turns a pet into a
-   world pin at its current position and facing. Today the pet → pin toggle has to use `here`, 2.5 yalms
-   in front of the character.
-3. **Focus without the keyboard**: `window.focus {"id": N, "keyboard": false}` to raise/select a panel
-   while the game keeps the keyboard, so Super+Left/Right can cycle without losing the key chords.
-4. **A terminal over Call**: `terminal.open {"profile": N, "pin": "pet", "run": "cmd"}`, ordered, returning
-   the panel id. It would give Super+Enter a world terminal regardless of the dropdown's state, and let
-   `Terminal=true` apps run.
-5. **The Wayland app id**: `window.list` entries with the toplevel's `app_id` (and PID), so icons do not
-   have to be guessed from the command's program name and the title.
+Still open: panel focus takes the keyboard, so the chords only work then with *Read keys globally* (and the
+keys reach the app too). Rather than `window.focus {"keyboard": false}`, the better fix would be ghostty
+leaving configured chords (e.g. every Super chord) out of what it forwards to a focused panel.
 
 ## Later
 

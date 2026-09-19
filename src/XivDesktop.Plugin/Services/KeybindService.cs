@@ -28,8 +28,11 @@ public sealed class KeybindService : IDisposable
     private readonly Dictionary<int, bool> validCache = [];
     private Dictionary<string, string>? compiledFrom;
 
-    public KeybindService(IFramework framework, IKeyState keys, IPluginLog log, Configuration config, Action<string> run)
+    private readonly Func<bool> panelHasKeyboard;
+
+    public KeybindService(IFramework framework, IKeyState keys, IPluginLog log, Configuration config, Action<string> run, Func<bool> panelHasKeyboard)
     {
+        this.panelHasKeyboard = panelHasKeyboard;
         this.framework = framework;
         this.keys = keys;
         this.log = log;
@@ -71,7 +74,10 @@ public sealed class KeybindService : IDisposable
                 return;
             }
 
-            var blocked = ImGui.GetIO().WantTextInput;
+            // While a ghostty panel has the keyboard, ghostty sets WantTextInput every frame, and Dalamud then
+            // withholds key messages from the game, so IKeyState sees nothing. With global reading the chords
+            // still work then (the keys also reach the panel); an ImGui text field of anyone else still blocks.
+            var blocked = ImGui.GetIO().WantTextInput && !(config.ReadKeysGlobally && panelHasKeyboard() && !ImGui.IsAnyItemActive());
             var (fired, consumed) = tracker.Update(IsDown, blocked);
             foreach (var vk in consumed)
             {

@@ -107,3 +107,20 @@ public class WorkspaceTests
         Assert.Equal(WorkspaceModel.Count, m.WorkspaceOf(1));
     }
 }
+
+public class WorkspaceReportedHiddenTests
+{
+    [Fact]
+    public void ReportedHiddenStateWins()
+    {
+        var m = new WorkspaceModel();
+        var a = new WindowPanel { Id = 1, Title = "a", State = "live", Kind = "pet", Hidden = false };
+        m.Reconcile([a]);
+        m.Move(1, 2);
+        m.MarkHidden(1, true); // we sent a hide, but ghostty still reports it shown: send again
+        Assert.Equal([new VisibilityChange(1, true)], m.Plan([a]));
+        Assert.Empty(m.Plan([a with { Hidden = true }]));
+        m.Switch(2);
+        Assert.Equal([new VisibilityChange(1, false)], m.Plan([a with { Hidden = true }]));
+    }
+}

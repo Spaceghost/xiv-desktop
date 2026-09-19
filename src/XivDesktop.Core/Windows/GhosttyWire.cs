@@ -31,6 +31,18 @@ public sealed record WindowPanel
     /// <summary>The panel has the keyboard.</summary>
     public bool Focused { get; init; }
 
+    /// <summary>The world anchor (pet, pin, me, target, orbit, none); "" from an older ghostty-dalamud.</summary>
+    public string Anchor { get; init; } = "";
+
+    /// <summary>Hidden by window.hide; null when ghostty-dalamud does not report it (older builds).</summary>
+    public bool? Hidden { get; init; }
+
+    /// <summary>The agent streaming it ("default").</summary>
+    public string Agent { get; init; } = "";
+
+    /// <summary>The window's stable key from the agent's list, or "".</summary>
+    public string Key { get; init; } = "";
+
     public bool IsLive => State == "live";
 
     public bool IsEnded => State == "ended";
@@ -81,7 +93,13 @@ public sealed record WindowListSnapshot
 }
 
 /// <summary>A parsed <c>agent.status</c> result.</summary>
-public sealed record AgentStatus(bool Connected, int Version, bool WindowsOk, string Agent);
+public sealed record AgentStatus(bool Connected, int Version, bool WindowsOk, string Agent, long WindowLists = 0);
+
+/// <summary>An app the agent can start (<c>agent.apps</c>): its desktop id, name, icon and categories.</summary>
+public sealed record AgentApp(string Id, string Name, string Icon, IReadOnlyList<string> Categories);
+
+/// <summary>The world panel with the keyboard (<c>focus.get</c>): 0 when none; kind "window" or "terminal".</summary>
+public sealed record FocusInfo(long Id, string Kind);
 
 /// <summary>Reply envelope: <c>{"ok": true, "result": …}</c> or <c>{"ok": false, "error": "…"}</c>.</summary>
 public sealed record CallReply(bool Ok, string? Error, JsonElement Result)
@@ -130,6 +148,61 @@ public static class GhosttyWire
     public static string Focus(long id) => Request("window.focus", new JsonObject { ["id"] = id });
 
     public static string Place(long id, string pin) => Request("window.place", new JsonObject { ["id"] = id, ["pin"] = pin.Trim() });
+
+    public static string Hide(long id, bool hidden) => Request("window.hide", new JsonObject { ["id"] = id, ["hidden"] = hidden });
+
+    public static string TogglePet(long id) => Request("window.toggle_pet", new JsonObject { ["id"] = id });
+
+    /// <summary>terminal.new: a world terminal; profile is a name or a 1-based number, pin as /term pin takes it.</summary>
+    public static string TerminalNew(string? profile = null, string? pin = null)
+    {
+        var p = new JsonObject();
+        if (!string.IsNullOrWhiteSpace(profile))
+            p["profile"] = profile.Trim();
+        if (!string.IsNullOrWhiteSpace(pin))
+            p["pin"] = pin.Trim();
+        return Request("terminal.new", p);
+    }
+
+    public static string FocusGet() => Request("focus.get");
+
+    public static string FocusCycle(int dir) => Request("focus.cycle", new JsonObject { ["dir"] = dir < 0 ? "prev" : "next" });
+
+    public static string AgentApps() => Request("agent.apps");
+
+    public static string AgentWindowsRefresh() => Request("agent.windows.refresh");
+
+    /// <summary>The window.open match text that makes the agent start the app with desktop id <paramref name="id"/>.</summary>
+    public static string AppMatch(string id) => "app:" + id;
+
+    public static List<AgentApp> ParseAgentApps(string? json)
+    {
+        var reply = ParseReply(json);
+        var list = new List<AgentApp>();
+        if (!reply.Ok || reply.Result.ValueKind != JsonValueKind.Array)
+            return list;
+        foreach (var a in reply.Result.EnumerateArray())
+        {
+            if (a.ValueKind != JsonValueKind.Object)
+                continue;
+            var id = Str(a, "id").Trim();
+            if (id.Length == 0 || id.Contains('\n') || id.Contains('\r'))
+                continue;
+            var name = Str(a, "name").Trim();
+            list.Add(new AgentApp(id, name.Length > 0 ? name : id, Str(a, "icon").Trim(),
+                Str(a, "categories").Split(';', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)));
+        }
+
+        return list;
+    }
+
+    public static FocusInfo? ParseFocus(string? json)
+    {
+        var reply = ParseReply(json);
+        if (!reply.Ok || reply.Result.ValueKind != JsonValueKind.Object)
+            return null;
+        return new FocusInfo(Long(reply.Result, "id") ?? 0, Str(reply.Result, "kind"));
+    }
 
     public static CallReply ParseReply(string? json)
     {
@@ -198,6 +271,10 @@ public static class GhosttyWire
                     State = Str(w, "state"),
                     Kind = Str(w, "kind"),
                     Focused = w.TryGetProperty("focused", out var f) && f.ValueKind == JsonValueKind.True,
+                    Anchor = Str(w, "anchor"),
+                    Hidden = w.TryGetProperty("hidden", out var hd) && hd.ValueKind is JsonValueKind.True or JsonValueKind.False ? hd.ValueKind == JsonValueKind.True : null,
+                    Agent = Str(w, "agent"),
+                    Key = Str(w, "key"),
                 });
             }
         }
@@ -236,7 +313,8 @@ public static class GhosttyWire
             r.TryGetProperty("connected", out var c) && c.ValueKind == JsonValueKind.True,
             (int)(Long(r, "version") ?? 0),
             r.TryGetProperty("windows_ok", out var w) && w.ValueKind == JsonValueKind.True,
-            Str(r, "agent"));
+            Str(r, "agent"),
+            Long(r, "window_lists") ?? 0);
     }
 
     private static long? Long(JsonElement o, string name)

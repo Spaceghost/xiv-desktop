@@ -64,7 +64,8 @@ public sealed class Plugin : IDalamudPlugin
             palette = new PaletteWindow(runner, desktop, session, textures, pluginInterface, config);
             runner.TogglePalette = palette.Toggle;
             runner.ToggleGrid = launcher.Toggle;
-            var keybinds = Track(new KeybindService(framework, keys, log, config, action => OnKey(runner, action)));
+            var keybinds = Track(new KeybindService(framework, keys, log, config, action => OnKey(runner, action), () => ghostty.KeyboardFocus is { Id: > 0 }));
+            ghostty.AgentAppsChanged += catalog.SetAgentApps;
             settings = new SettingsWindow(config, desktop, session, keybinds);
             windowSystem.AddWindow(launcher);
             windowSystem.AddWindow(palette);

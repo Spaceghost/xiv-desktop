@@ -45,7 +45,7 @@ public sealed class CommandRunner
             CurrentWorkspace = session.CurrentWorkspace,
             GhosttyAvailable = desktop.Backend.Available,
             WindowsAvailable = session.Windows.WindowsAvailable,
-            CanLaunch = a => LaunchPlan.For(a).Command != null,
+            CanLaunch = a => desktop.CanLaunch(a, out _),
         };
     }
 
@@ -69,6 +69,8 @@ public sealed class CommandRunner
                     return c.Id != 0 ? session.Move(c.Id, c.Number) : session.MoveTarget(c.Number);
                 case PaletteCommand.Reload:
                     desktop.Catalog.Reload();
+                    if (session.Windows.Extended)
+                        session.Windows.RefreshAgentLists();
                     return "ok: rescanning applications";
                 case PaletteCommand.Copy:
                     if (c.Arg.Length == 0)

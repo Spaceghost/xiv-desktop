@@ -55,10 +55,13 @@ public sealed class SessionService : IDisposable
     /// <summary>Live and pending panels, oldest first.</summary>
     public List<WindowPanel> OpenPanels() => windows.Snapshot.Windows.Where(w => !w.IsEnded).ToList();
 
+    /// <summary>Hidden by window.hide (as reported), or by XivDesktop's own place "hide" on an older ghostty.</summary>
+    public bool IsHiddenNow(WindowPanel w) => w.Hidden ?? workspaces.Hidden.Contains(w.Id);
+
     /// <summary>The panel window actions apply to: the focused one, else the last one focused, else the newest on this workspace.</summary>
     public WindowPanel? Target()
     {
-        var open = OpenPanels();
+        var open = OpenPanels().Where(w => !IsHiddenNow(w)).ToList();
         return open.FirstOrDefault(w => w.Focused)
                ?? open.FirstOrDefault(w => w.Id == lastFocused)
                ?? open.LastOrDefault(w => workspaces.WorkspaceOf(w.Id) is var ws && (ws == 0 || ws == workspaces.Current));
@@ -100,14 +103,32 @@ public sealed class SessionService : IDisposable
 
     public string CloseTarget() => Target() is { } w ? Close(w.Id) : Report(NoTarget());
 
-    /// <summary>Pet → pinned (<see cref="Configuration.PinArgs"/>), anything else → pet.</summary>
-    public string TogglePet() => Target() is { } w ? Place(w.Id, w.IsPet ? config.PinArgs : "pet") : Report(NoTarget());
+    /// <summary>
+    /// Pet ↔ pin. With window.toggle_pet a pet is pinned right where it was last shown; an older ghostty gets
+    /// window.place with <see cref="Configuration.PinArgs"/> or "pet".
+    /// </summary>
+    public string TogglePet() => Target() is { } w ? TogglePet(w) : Report(NoTarget());
+
+    public string TogglePet(WindowPanel w)
+    {
+        if (!windows.Extended)
+            return Place(w.Id, w.IsPet ? config.PinArgs : "pet");
+        var r = windows.TogglePet(w.Id);
+        if (r.StartsWith("ok", StringComparison.Ordinal))
+            lastFocused = w.Id;
+        return Report(r);
+    }
 
     public string PinFront() => Target() is { } w ? Place(w.Id, config.PinFrontArgs) : Report(NoTarget());
 
     /// <summary>Focus the next (+1) or previous (-1) panel on the current workspace, wrapping around.</summary>
     public string CycleFocus(int step)
     {
+        // ghostty's focus.cycle skips hidden panels, which with hiding on is exactly this workspace, and it
+        // also cycles through world terminals.
+        if (windows.Extended && config.WorkspacesHide)
+            return Report(windows.FocusCycle(step));
+
         var ids = workspaces.PanelsOn(workspaces.Current, windows.Snapshot.Windows);
         foreach (var w in OpenPanels())
         {
@@ -150,8 +171,9 @@ public sealed class SessionService : IDisposable
         return Report($"ok: {w.DisplayName} → workspace {n}");
     }
 
-    /// <summary>Super+Enter: the configured /term line ("new" opens a ghostty tab).</summary>
-    public string OpenTerminal() => PostLine(config.TerminalLine);
+    /// <summary>Super+Enter: terminal.new (profile and pin from the settings); an older ghostty gets the /term line.</summary>
+    public string OpenTerminal()
+        => windows.Extended ? Report(windows.TerminalNew(config.TerminalProfile, config.TerminalPin)) : PostLine(config.TerminalLine);
 
     public string PostLine(string line)
     {
@@ -173,15 +195,19 @@ public sealed class SessionService : IDisposable
     {
         foreach (var w in OpenPanels())
         {
-            if (IsHidden(w.Id) && !config.WorkspacesHide)
+            if (IsHiddenNow(w) && !config.WorkspacesHide)
             {
-                windows.Place(w.Id, ShowArgs);
+                SetHidden(w.Id, false);
                 workspaces.MarkHidden(w.Id, false);
             }
         }
 
         ApplyVisibility();
     }
+
+    /// <summary>window.hide on a ghostty that has it; else /term pin hide through window.place.</summary>
+    private string SetHidden(long id, bool hide)
+        => windows.Extended ? windows.Hide(id, hide) : windows.Place(id, hide ? HideArgs : ShowArgs);
 
     private string NoTarget() => windows.WindowsAvailable ? "error: no window panel to act on" : "error: needs ghostty-dalamud's window IPC (GhosttyDalamud.v1.Call)";
 
@@ -226,7 +252,7 @@ public sealed class SessionService : IDisposable
             return;
         foreach (var change in workspaces.Plan(windows.Snapshot.Windows))
         {
-            var r = windows.Place(change.Id, change.Hide ? HideArgs : ShowArgs);
+            var r = SetHidden(change.Id, change.Hide);
             if (r.StartsWith("ok", StringComparison.Ordinal))
                 workspaces.MarkHidden(change.Id, change.Hide);
             else
@@ -325,7 +351,7 @@ public sealed class SessionService : IDisposable
                     Kind = w.Kind,
                     Focused = w.Focused,
                     Workspace = workspaces.WorkspaceOf(w.Id),
-                    Hidden = workspaces.Hidden.Contains(w.Id),
+                    Hidden = IsHiddenNow(w),
                     AppId = WindowApps.Find(apps, w, launched)?.Id,
                 };
             }).ToList(),

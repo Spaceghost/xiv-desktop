@@ -1,6 +1,7 @@
 using Dalamud.Plugin;
 using Dalamud.Plugin.Services;
 using XivDesktop.Core;
+using XivDesktop.Core.Windows;
 using XivDesktop.Shared;
 
 namespace XivDesktop.Plugin.Services;
@@ -54,39 +55,99 @@ public sealed class DesktopService
         return app == null ? Fail($"no app matches \"{idOrQuery.Trim()}\"") : Launch(app);
     }
 
+    /// <summary>
+    /// Whether <paramref name="app"/> can start now: with ghostty's Call gate every planned kind can (agent
+    /// apps by id, Terminal=true apps in a new world terminal); through Post only plain run commands.
+    /// </summary>
+    public bool CanLaunch(AppInfo app, out string? reason)
+    {
+        var windows = Backend as IWindowManager;
+        if (windows is { WindowsAvailable: true })
+        {
+            var (target, error) = LaunchPlan.Plan(app);
+            reason = target == null ? error : target.Kind == LaunchKind.Terminal && !windows.Extended ? "terminal apps need a newer ghostty-dalamud (terminal.new)" : null;
+            return reason == null;
+        }
+
+        reason = LaunchPlan.For(app).Error;
+        return reason == null;
+    }
+
     public string Launch(AppInfo app)
     {
-        var (command, error) = LaunchPlan.For(app);
-        if (command == null)
-            return Fail(error ?? "cannot launch");
         if (!Backend.Available)
             return Fail(Backend.MissingMessage);
+        if (!CanLaunch(app, out var reason))
+            return Fail(reason ?? "cannot launch");
 
         var task = framework.RunOnFrameworkThread(() =>
         {
+            string what;
             if (Backend is IWindowManager { WindowsAvailable: true } windows)
             {
-                // Through the Call gate the new panel's id comes back, so its icon is known for sure.
-                var result = windows.Open(run: command, onPanel: panel => LaunchedApps[panel] = app.Id);
+                var target = LaunchPlan.Plan(app).Target!;
+                void Remember(long panel) => LaunchedApps[panel] = app.Id;
+                string result;
+                switch (target.Kind)
+                {
+                    case LaunchKind.AgentApp:
+                        // The agent starts its own listed app; the panel id comes back through window.list.
+                        what = GhosttyWire.AppMatch(target.Value);
+                        result = windows.Open(match: what, onPanel: Remember);
+                        break;
+                    case LaunchKind.Terminal:
+                        // terminal.new, then type the command into it once its id is known. The shell may not be
+                        // ready yet, so the text goes a moment later (ghostty queues writes to a session).
+                        what = "terminal: " + target.Value;
+                        var command = target.Value;
+                        result = windows.TerminalNew(config.TerminalProfile, config.TerminalPin, panel =>
+                        {
+                            Remember(panel);
+                            framework.RunOnTick(() => SendToTerminal(panel, command), TimeSpan.FromMilliseconds(TerminalSendDelayMs));
+                        });
+                        break;
+                    default:
+                        what = target.Value;
+                        result = windows.Open(run: target.Value, onPanel: Remember);
+                        break;
+                }
+
                 if (result.StartsWith("error", StringComparison.Ordinal))
                     throw new InvalidOperationException(result[7..]);
             }
             else
             {
-                Backend.Launch(command);
+                what = LaunchPlan.For(app).Command!;
+                Backend.Launch(what);
             }
 
             config.Recents = UserLists.PushRecent(config.Recents, app.Id);
             Save();
             LastLaunch = $"{app.Name} ({app.Id}) at {DateTime.Now:HH:mm:ss}";
             LastError = null;
-            log.Information("XivDesktop: launched {Id}: {Command}", app.Id, command);
+            log.Information("XivDesktop: launched {Id}: {What}", app.Id, what);
         });
 
         // On the framework thread the work ran inline, so a backend failure is already visible.
         if (task.IsFaulted)
             return Fail($"{Backend.Name} rejected the launch: {task.Exception?.GetBaseException().Message}");
         return $"ok: launched {app.Name} ({app.Id})";
+    }
+
+    /// <summary>How long after terminal.new's id arrives the command is typed (the agent starts the shell meanwhile).</summary>
+    public const int TerminalSendDelayMs = 1500;
+
+    private void SendToTerminal(long panel, string command)
+    {
+        try
+        {
+            if (Backend is GhosttyCallBackend { Post.Available: true } cb)
+                cb.Post.Post(LaunchPlan.SendLine(panel, command));
+        }
+        catch (Exception ex)
+        {
+            log.Warning(ex, "XivDesktop: typing into terminal {Panel} failed", panel);
+        }
     }
 
     /// <summary>Toggles the favourite flag and returns the new state.</summary>
@@ -136,7 +197,7 @@ public sealed class DesktopService
                 Keywords = [.. a.Keywords],
                 Recent = r >= 0 ? r : null,
                 Terminal = a.Terminal,
-                Launchable = LaunchPlan.For(a).Command != null,
+                Launchable = CanLaunch(a, out _),
             };
         }).ToList();
     }

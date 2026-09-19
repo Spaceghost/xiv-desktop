@@ -30,6 +30,11 @@ public sealed class GhosttyCallBackend : ILaunchBackend, IWindowManager, IDispos
 
     private volatile WindowListSnapshot snapshot = WindowListSnapshot.Empty;
     private volatile AgentStatus? agent;
+    private volatile FocusInfo? focus;
+    private volatile IReadOnlyList<AgentApp> agentApps = [];
+    private long appsForLists = -1;
+    private long lastRefreshMs = long.MinValue / 2;
+    private const long RefreshIntervalMs = 30_000;
     private long lastListMs = long.MinValue / 2;
     private long lastAgentMs = long.MinValue / 2;
     private string? lastLoggedError;
@@ -49,6 +54,14 @@ public sealed class GhosttyCallBackend : ILaunchBackend, IWindowManager, IDispos
     public event Action<WindowListSnapshot, WindowListSnapshot>? Changed;
 
     public event Action<WindowRequestResult>? RequestFailed;
+
+    public event Action<IReadOnlyList<AgentApp>>? AgentAppsChanged;
+
+    public bool Extended { get; private set; }
+
+    public FocusInfo? KeyboardFocus => focus;
+
+    public IReadOnlyList<AgentApp> AgentApps => agentApps;
 
     public bool WindowsAvailable
     {
@@ -115,6 +128,20 @@ public sealed class GhosttyCallBackend : ILaunchBackend, IWindowManager, IDispos
 
     public string Place(long id, string pin) => Change(GhosttyWire.Place(id, pin));
 
+    public string Hide(long id, bool hidden) => Change(GhosttyWire.Hide(id, hidden));
+
+    public string TogglePet(long id) => Change(GhosttyWire.TogglePet(id));
+
+    public string TerminalNew(string? profile, string? pin, Action<long>? onPanel = null) => Change(GhosttyWire.TerminalNew(profile, pin), onPanel);
+
+    public string FocusCycle(int dir) => Change(GhosttyWire.FocusCycle(dir));
+
+    public string RefreshAgentLists()
+    {
+        lastRefreshMs = Environment.TickCount64;
+        return Change(GhosttyWire.AgentWindowsRefresh());
+    }
+
     private string Change(string request, Action<long>? onPanel = null)
     {
         if (!WindowsAvailable)
@@ -167,6 +194,8 @@ public sealed class GhosttyCallBackend : ILaunchBackend, IWindowManager, IDispos
                 if (snapshot.Rev != -1)
                     Publish(WindowListSnapshot.Empty);
                 agent = null;
+                focus = null;
+                Extended = false;
                 return;
             }
 
@@ -174,7 +203,12 @@ public sealed class GhosttyCallBackend : ILaunchBackend, IWindowManager, IDispos
             {
                 lastAgentMs = now;
                 agent = GhosttyWire.ParseAgentStatus(call.InvokeFunc(GhosttyWire.AgentStatusRequest()));
+                PollAgentApps(now);
             }
+
+            // focus.get doubles as the probe for the v1.1 methods (they arrived together).
+            focus = GhosttyWire.ParseFocus(call.InvokeFunc(GhosttyWire.FocusGet()));
+            Extended = focus != null;
 
             var reply = GhosttyWire.ParseReply(call.InvokeFunc(GhosttyWire.List()));
             var rev = GhosttyWire.PeekRev(reply);
@@ -193,6 +227,50 @@ public sealed class GhosttyCallBackend : ILaunchBackend, IWindowManager, IDispos
         {
             LogOnce("window.list failed: " + ex.Message);
         }
+    }
+
+    /// <summary>
+    /// agent.apps fills from the agent's window list (WLISTR). Re-read it whenever a new list arrived; while it
+    /// is empty and the agent is connected, ask for a list at most every 30 s.
+    /// </summary>
+    private void PollAgentApps(long now)
+    {
+        if (!Extended || agent is not { Connected: true } a)
+            return;
+        if (a.WindowLists != appsForLists)
+        {
+            appsForLists = a.WindowLists;
+            var apps = GhosttyWire.ParseAgentApps(call.InvokeFunc(GhosttyWire.AgentApps()));
+            if (!SameApps(apps, agentApps))
+            {
+                agentApps = apps;
+                log.Information("XivDesktop: ghostty-agent lists {Count} apps", apps.Count);
+                try
+                {
+                    AgentAppsChanged?.Invoke(apps);
+                }
+                catch (Exception ex)
+                {
+                    log.Warning(ex, "XivDesktop: agent apps handler failed");
+                }
+            }
+        }
+
+        if (agentApps.Count == 0 && now - lastRefreshMs >= RefreshIntervalMs)
+            RefreshAgentLists();
+    }
+
+    private static bool SameApps(IReadOnlyList<AgentApp> a, IReadOnlyList<AgentApp> b)
+    {
+        if (a.Count != b.Count)
+            return false;
+        for (var i = 0; i < a.Count; i++)
+        {
+            if (a[i].Id != b[i].Id || a[i].Name != b[i].Name || a[i].Icon != b[i].Icon)
+                return false;
+        }
+
+        return true;
     }
 
     private void Publish(WindowListSnapshot next)

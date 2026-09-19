@@ -49,8 +49,14 @@ public sealed class Configuration : IPluginConfiguration
     /// </summary>
     public bool ReadKeysGlobally { get; set; }
 
-    /// <summary>What Super+Enter posts to ghostty-dalamud (a /term line without "/term").</summary>
+    /// <summary>What Super+Enter posts to ghostty-dalamud (a /term line without "/term") when terminal.new is not available.</summary>
     public string TerminalLine { get; set; } = "new";
+
+    /// <summary>terminal.new profile for Super+Enter and terminal apps: a name or a 1-based number; "" = ghostty's default.</summary>
+    public string TerminalProfile { get; set; } = "";
+
+    /// <summary>terminal.new pin for Super+Enter and terminal apps ("pet", "here", …).</summary>
+    public string TerminalPin { get; set; } = "pet";
 
     /// <summary>/term pin arguments for turning a pet into a pin (Super+Space on a pet).</summary>
     public string PinArgs { get; set; } = "here";
@@ -95,6 +101,8 @@ public sealed class Configuration : IPluginConfiguration
         config.PinArgs = string.IsNullOrWhiteSpace(config.PinArgs) ? "here" : config.PinArgs;
         config.PinFrontArgs = string.IsNullOrWhiteSpace(config.PinFrontArgs) ? "here" : config.PinFrontArgs;
         config.Workspaces ??= [];
+        config.TerminalProfile ??= "";
+        config.TerminalPin = string.IsNullOrWhiteSpace(config.TerminalPin) ? "pet" : config.TerminalPin;
         config.CurrentWorkspace = Math.Clamp(config.CurrentWorkspace, 1, WorkspaceModel.Count);
         config.Version = CurrentVersion;
         return config;

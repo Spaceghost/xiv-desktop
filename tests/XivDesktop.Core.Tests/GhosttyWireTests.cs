@@ -174,3 +174,90 @@ public class WindowAppsTests
     [InlineData("", "")]
     public void ProgramOfACommand(string cmd, string prog) => Assert.Equal(prog, WindowApps.Program(cmd));
 }
+
+public class GhosttyWireV11Tests
+{
+    [Fact]
+    public void ParsesTheNewWindowFields()
+    {
+        var s = GhosttyWire.ParseWindowList("""
+            {"ok": true, "result": {"rev": 7, "windows": [
+              {"id": 12, "sid": 5, "title": "Yad Window", "app": "yad", "w": 640, "h": 400,
+               "state": "live", "kind": "pet", "anchor": "pet", "hidden": false, "focused": false,
+               "agent": "default", "key": "yad-1"},
+              {"id": 13, "state": "live", "kind": "pin", "hidden": true}], "requests": []}}
+            """)!;
+        Assert.Equal(("pet", false, "default", "yad-1"), (s.Windows[0].Anchor, s.Windows[0].Hidden, s.Windows[0].Agent, s.Windows[0].Key));
+        Assert.True(s.Windows[1].Hidden);
+        Assert.Null(GhosttyWire.ParseWindowList("""{"ok":true,"result":{"rev":1,"windows":[{"id":1}]}}""")!.Windows[0].Hidden);
+    }
+
+    [Fact]
+    public void ParsesAgentAppsFocusAndStatus()
+    {
+        var apps = GhosttyWire.ParseAgentApps("""{"ok": true, "result": [{"id": "foot", "name": "Foot", "icon": "foot", "categories": "System;TerminalEmulator;"}, {"name": "no id"}, {"id": "x"}]}""");
+        Assert.Equal(2, apps.Count);
+        Assert.Equal(new[] { "System", "TerminalEmulator" }, apps[0].Categories);
+        Assert.Equal("x", apps[1].Name);
+        Assert.Empty(GhosttyWire.ParseAgentApps("""{"ok":true,"result":[]}"""));
+
+        Assert.Equal(new FocusInfo(12, "window"), GhosttyWire.ParseFocus("""{"ok": true, "result": {"id": 12, "kind": "window"}}"""));
+        Assert.Equal(0, GhosttyWire.ParseFocus("""{"ok": true, "result": {"id": 0}}""")!.Id);
+        Assert.Equal(2, GhosttyWire.ParseAgentStatus("""{"ok": true, "result": {"connected": true, "version": 3, "windows_ok": true, "agent": "a", "window_lists": 2}}""")!.WindowLists);
+    }
+
+    [Fact]
+    public void BuildsTheNewRequests()
+    {
+        using var hide = JsonDocument.Parse(GhosttyWire.Hide(12, true));
+        Assert.Equal("window.hide", hide.RootElement.GetProperty("method").GetString());
+        Assert.True(hide.RootElement.GetProperty("params").GetProperty("hidden").GetBoolean());
+        using var term = JsonDocument.Parse(GhosttyWire.TerminalNew(null, "pet"));
+        Assert.False(term.RootElement.GetProperty("params").TryGetProperty("profile", out _));
+        Assert.Equal("pet", term.RootElement.GetProperty("params").GetProperty("pin").GetString());
+        using var cyc = JsonDocument.Parse(GhosttyWire.FocusCycle(-1));
+        Assert.Equal("prev", cyc.RootElement.GetProperty("params").GetProperty("dir").GetString());
+        using var tp = JsonDocument.Parse(GhosttyWire.TogglePet(3));
+        Assert.Equal("window.toggle_pet", tp.RootElement.GetProperty("method").GetString());
+        using var open = JsonDocument.Parse(GhosttyWire.Open(match: GhosttyWire.AppMatch("foot")));
+        Assert.Equal("app:foot", open.RootElement.GetProperty("params").GetProperty("match").GetString());
+    }
+
+    [Fact]
+    public void AgentCatalogIsThePrimaryListWithStableIds()
+    {
+        var scanned = new AppCatalog(
+            [new AppInfo { Id = "foot.desktop", Name = "Foot", Keywords = ["shell"], IconPath = "Z:\\scan\\foot.png", Command = "foot" }],
+            new CatalogStats(), [], DateTimeOffset.MinValue);
+        var apps = new List<AgentApp>
+        {
+            new("foot", "Foot", "", ["System"]),
+            new("org.gnome.TextEditor.desktop", "Text Editor", "/home/u/.cache/ghostty-agent/icons/org.gnome.TextEditor.png", []),
+            new("zed", "Zed", "zed", []),
+            new("foot", "dup", "", []),
+        };
+        var c = AgentCatalog.Build(apps, AgentCatalog.IconMapper(HostPaths.WineMap, null), scanned);
+        Assert.Equal(["Foot", "Text Editor", "Zed"], c.Apps.Select(a => a.Name));
+        var foot = c.Find("foot")!;
+        Assert.Equal(("foot.desktop", "foot", "Z:\\scan\\foot.png"), (foot.Id, foot.AgentId, foot.IconPath));
+        Assert.Equal(["shell"], foot.Keywords);
+        Assert.Equal("Z:\\home\\u\\.cache\\ghostty-agent\\icons\\org.gnome.TextEditor.png", c.Find("org.gnome.TextEditor")!.IconPath);
+        Assert.Equal("org.gnome.TextEditor", c.Find("org.gnome.TextEditor")!.AgentId);
+        Assert.Null(c.Find("zed")!.IconPath);
+        Assert.Equal("app:zed", c.Find("zed")!.Command);
+
+        // Agent apps never go through a shell command.
+        Assert.Null(LaunchPlan.For(foot).Command);
+        Assert.Equal(new LaunchTarget(LaunchKind.AgentApp, "foot"), LaunchPlan.Plan(foot).Target);
+    }
+
+    [Fact]
+    public void TerminalAppsPlanAsTypedCommands()
+    {
+        var htop = new AppInfo { Id = "htop.desktop", Name = "htop", Command = "htop", Terminal = true };
+        Assert.Equal(new LaunchTarget(LaunchKind.Terminal, "htop"), LaunchPlan.Plan(htop).Target);
+        Assert.Null(LaunchPlan.For(htop).Command); // the Post fallback still refuses them
+        Assert.Equal(new LaunchTarget(LaunchKind.Run, "foot"), LaunchPlan.Plan(new AppInfo { Id = "f", Name = "f", Command = "foot" }).Target);
+        Assert.Equal(@"send #7 grep 'a\\b' x", LaunchPlan.SendLine(7, @"grep 'a\b' x"));
+    }
+}
