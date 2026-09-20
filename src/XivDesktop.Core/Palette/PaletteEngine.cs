@@ -1,3 +1,4 @@
+using XivDesktop.Core.Arcade;
 using XivDesktop.Core.Input;
 using XivDesktop.Core.Windows;
 using XivDesktop.Core.Workspaces;
@@ -63,6 +64,7 @@ public sealed record PaletteCommand(string Kind, string Arg = "", long Id = 0, i
     public const string Claude = "claude";     // Arg: a prompt for a new or focused session
     public const string ClaudeSession = "claude-session"; // Arg: an open session's name; focuses its panel
     public const string ClaudeResume = "claude-resume";   // Arg: a remembered session's name or id
+    public const string Arcade = "arcade";     // Arg: an arcade game id; empty opens the arcade window
 }
 
 /// <summary>A keyboard action on a palette row: its label, its chord, and what it runs.</summary>
@@ -149,6 +151,12 @@ public sealed record PaletteContext
     /// <summary>Remembered Claude sessions that can be resumed: their name or id, and a summary.</summary>
     public IReadOnlyList<(string Name, string Subtitle)> ClaudeRecent { get; init; } = [];
 
+    /// <summary>The player's arcade library (his own game files), so the palette finds games as it finds apps.</summary>
+    public IReadOnlyList<ArcadeGame> ArcadeGames { get; init; } = [];
+
+    /// <summary>A system id ("psx") as the player reads it ("PlayStation").</summary>
+    public Func<string, string> ArcadeSystemName { get; init; } = id => id;
+
     /// <summary>A Claude session can be started or talked to at all.</summary>
     public bool ClaudeAvailable { get; init; }
 
@@ -180,7 +188,11 @@ public static class PaletteEngine
         if (all || q.Filter == PaletteFilter.Calc)
             Calc(items, q.Text, forced: q.Filter == PaletteFilter.Calc);
         if (all || q.Filter == PaletteFilter.Apps)
+        {
             Apps(items, ctx, q.Text);
+            ArcadeRows(items, ctx, q.Text);
+        }
+
         if (all || q.Filter == PaletteFilter.Windows)
         {
             if (ctx.Panels != null)
@@ -417,6 +429,50 @@ public static class PaletteEngine
     /// <summary>The row action bound to <paramref name="chord"/>, if any.</summary>
     public static RowAction? ActionFor(PaletteItem item, KeyChord chord)
         => chord.IsNone ? null : RowActions(item).FirstOrDefault(a => a.Chord == chord);
+
+    /// <summary>
+    /// Arcade games by name ("ff7", "tactics"), only once something is typed so the empty palette stays the
+    /// player's apps. "arcade" alone offers the library window.
+    /// </summary>
+    private static void ArcadeRows(List<PaletteItem> items, PaletteContext ctx, string text)
+    {
+        var query = text.StartsWith("arcade ", StringComparison.OrdinalIgnoreCase) ? text[7..].Trim() : text.Trim();
+        if (query.Length == 0)
+            return;
+        if ("arcade".StartsWith(text.Trim(), StringComparison.OrdinalIgnoreCase) && text.Trim().Length >= 3)
+        {
+            items.Add(new PaletteItem
+            {
+                Provider = PaletteProvider.Command,
+                Title = "Arcade",
+                Subtitle = ctx.ArcadeGames.Count == 0 ? "Set up your classic games library" : $"{ctx.ArcadeGames.Count} games · open the library",
+                BadgeText = "Arcade",
+                Score = 650,
+                Command = new PaletteCommand(PaletteCommand.Arcade),
+            });
+        }
+
+        foreach (var g in ctx.ArcadeGames)
+        {
+            if (ArcadeCommands.Score(g.Title, query) is not { } score)
+                continue;
+            var launchable = ctx.GhosttyAvailable && g.Ready;
+            items.Add(new PaletteItem
+            {
+                Provider = PaletteProvider.App,
+                Title = g.Title,
+                Subtitle = ctx.ArcadeSystemName(g.System) + (g.Year is { } y ? $" · {y}" : "") + (g.Discs > 1 ? $" · {g.Discs} discs" : ""),
+                BadgeText = "Arcade",
+
+                // Below an app with the same score, above loose matches: 1000 (exact) maps to 330, a fuzzy hit to ~60.
+                Score = Math.Max(20, score / 3),
+                Highlights = Fuzzy.Match(g.Title, query)?.Positions ?? [],
+                Command = new PaletteCommand(PaletteCommand.Arcade, g.Id),
+                Enabled = launchable,
+                Reason = launchable ? null : !ctx.GhosttyAvailable ? "needs ghostty-dalamud" : "its emulator core is not installed yet (/arcade setup)",
+            });
+        }
+    }
 
     private static void Commands(List<PaletteItem> items, PaletteContext ctx, string text, bool forced)
     {
