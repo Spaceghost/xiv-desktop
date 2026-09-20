@@ -234,6 +234,21 @@ remain unverified, including a reflection-based popup workaround. They use
 XivDesktop IPC rather than a separate app-launching implementation.
 Installation and interaction details remain in [GUIDE.md](GUIDE.md).
 
+## Arcade (beta, not verified in game)
+
+`/arcade` is a library of **your own** classic games, Final Fantasy first, that start in RetroArch on
+the Linux host and appear as a game panel, with every save and save state kept in one folder that
+Syncthing copies between your machines. `/arcade ff7` plays the closest match, `/arcade last` resumes,
+`/arcade sync` forces a save sync, `/arcade setup` is the three-step first run, and the palette finds
+games by name. A LaunchBox folder can be copied in as it is. A game never starts while its saves are
+still arriving, a conflict keeps both saves with the newer one live, and an older save never replaces a
+newer one.
+
+XivDesktop never downloads, links to or helps find ROMs, disc images or BIOS files; it only reads
+folders you point it at. It installs nothing, starts no service and pairs no device: it shows the one
+command for each step. Host-side tests cover the logic; no emulator, controller or two-machine sync
+has been observed. Setup, folders, sync, conflicts and limits: [docs/ARCADE.md](docs/ARCADE.md).
+
 ## Experimental NPC and Claude interfaces
 
 | Interface | Role |
