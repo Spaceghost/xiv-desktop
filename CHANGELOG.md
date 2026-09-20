@@ -13,9 +13,9 @@ Statuses mean the same thing in every one of these mods:
 * **BETA** — merged, but not yet verified in game.
 * **SOON** — still being built.
 
-## [Unreleased] — In the workshop
+## [1.0.0] — Released 2026-09-20
 
-Everything here is merged into master. BETA means exactly that and no more: merged, and not yet seen working in the game.
+BETA entries are in this release but have not been verified in game yet; they become NEW or FIX once they have been seen working.
 
 * XivDesktop itself: a launcher for your Linux desktop's apps inside the game. `/desktop` opens an app grid with icons, favourites and recent apps; the apps run on the Linux host, not inside Wine, and appear as game panels through a compatible Ghostty for Dalamud build and its host agent. XivDesktop does not render or stream windows itself.
 * A keyboard-first launcher palette (Super+D by default, configurable): search apps and open panels, run actions, or type a sum into a bounded calculator.
