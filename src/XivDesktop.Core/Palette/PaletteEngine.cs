@@ -1,4 +1,3 @@
-using XivDesktop.Core.Arcade;
 using XivDesktop.Core.Input;
 using XivDesktop.Core.Windows;
 using XivDesktop.Core.Workspaces;
@@ -64,7 +63,7 @@ public sealed record PaletteCommand(string Kind, string Arg = "", long Id = 0, i
     public const string Claude = "claude";     // Arg: a prompt for a new or focused session
     public const string ClaudeSession = "claude-session"; // Arg: an open session's name; focuses its panel
     public const string ClaudeResume = "claude-resume";   // Arg: a remembered session's name or id
-    public const string Arcade = "arcade";     // Arg: an arcade game id; empty opens the arcade window
+    public const string Arcade = "arcade";     // Arg: a game id from the optional XivArcade mod (XivArcade.v1.Launch)
 }
 
 /// <summary>A keyboard action on a palette row: its label, its chord, and what it runs.</summary>
@@ -151,11 +150,11 @@ public sealed record PaletteContext
     /// <summary>Remembered Claude sessions that can be resumed: their name or id, and a summary.</summary>
     public IReadOnlyList<(string Name, string Subtitle)> ClaudeRecent { get; init; } = [];
 
-    /// <summary>The player's arcade library (his own game files), so the palette finds games as it finds apps.</summary>
-    public IReadOnlyList<ArcadeGame> ArcadeGames { get; init; } = [];
-
-    /// <summary>A system id ("psx") as the player reads it ("PlayStation").</summary>
-    public Func<string, string> ArcadeSystemName { get; init; } = id => id;
+    /// <summary>
+    /// Asks the optional XivArcade mod for games matching the text (its XivArcade.v1.Search IPC). The default
+    /// finds nothing, which is also what happens when that mod is not installed.
+    /// </summary>
+    public Func<string, IReadOnlyList<ArcadeHit>> ArcadeSearch { get; init; } = _ => [];
 
     /// <summary>A Claude session can be started or talked to at all.</summary>
     public bool ClaudeAvailable { get; init; }
@@ -430,46 +429,27 @@ public static class PaletteEngine
     public static RowAction? ActionFor(PaletteItem item, KeyChord chord)
         => chord.IsNone ? null : RowActions(item).FirstOrDefault(a => a.Chord == chord);
 
-    /// <summary>
-    /// Arcade games by name ("ff7", "tactics"), only once something is typed so the empty palette stays the
-    /// player's apps. "arcade" alone offers the library window.
-    /// </summary>
+    /// <summary>The player's classic games, when the XivArcade mod is installed; only once something is typed.</summary>
     private static void ArcadeRows(List<PaletteItem> items, PaletteContext ctx, string text)
     {
-        var query = text.StartsWith("arcade ", StringComparison.OrdinalIgnoreCase) ? text[7..].Trim() : text.Trim();
+        var query = text.Trim();
         if (query.Length == 0)
             return;
-        if ("arcade".StartsWith(text.Trim(), StringComparison.OrdinalIgnoreCase) && text.Trim().Length >= 3)
+        foreach (var hit in ctx.ArcadeSearch(query))
         {
-            items.Add(new PaletteItem
-            {
-                Provider = PaletteProvider.Command,
-                Title = "Arcade",
-                Subtitle = ctx.ArcadeGames.Count == 0 ? "Set up your classic games library" : $"{ctx.ArcadeGames.Count} games · open the library",
-                BadgeText = "Arcade",
-                Score = 650,
-                Command = new PaletteCommand(PaletteCommand.Arcade),
-            });
-        }
-
-        foreach (var g in ctx.ArcadeGames)
-        {
-            if (ArcadeCommands.Score(g.Title, query) is not { } score)
-                continue;
-            var launchable = ctx.GhosttyAvailable && g.Ready;
             items.Add(new PaletteItem
             {
                 Provider = PaletteProvider.App,
-                Title = g.Title,
-                Subtitle = ctx.ArcadeSystemName(g.System) + (g.Year is { } y ? $" · {y}" : "") + (g.Discs > 1 ? $" · {g.Discs} discs" : ""),
+                Title = hit.Title,
+                Subtitle = hit.Subtitle,
                 BadgeText = "Arcade",
 
-                // Below an app with the same score, above loose matches: 1000 (exact) maps to 330, a fuzzy hit to ~60.
-                Score = Math.Max(20, score / 3),
-                Highlights = Fuzzy.Match(g.Title, query)?.Positions ?? [],
-                Command = new PaletteCommand(PaletteCommand.Arcade, g.Id),
-                Enabled = launchable,
-                Reason = launchable ? null : !ctx.GhosttyAvailable ? "needs ghostty-dalamud" : "its emulator core is not installed yet (/arcade setup)",
+                // Below an app with the same score: XivArcade's 1000 (exact) maps to 330, a loose match to ~60.
+                Score = Math.Clamp(hit.Score / 3, 20, 340),
+                Highlights = Fuzzy.Match(hit.Title, query)?.Positions ?? [],
+                Command = new PaletteCommand(PaletteCommand.Arcade, hit.Id),
+                Enabled = hit.Ready,
+                Reason = hit.Ready ? null : "XivArcade cannot start it yet (/arcade setup)",
             });
         }
     }

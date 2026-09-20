@@ -17,6 +17,12 @@ public static class IpcContract
     /// </summary>
     public const string ListApps = "XivDesktop.v1.ListApps";
 
+    /// <summary>The optional XivArcade mod: string query → string JSON <c>[{"id","title","subtitle","ready","score"}]</c>.</summary>
+    public const string ArcadeSearch = "XivArcade.v1.Search";
+
+    /// <summary>The optional XivArcade mod: string game id → "ok: …" or "error: …".</summary>
+    public const string ArcadeLaunch = "XivArcade.v1.Launch";
+
     /// <summary>
     /// Func&lt;string, string&gt;: launch by desktop-file id ("org.gnome.TextEditor" or with ".desktop") or by search query
     /// (best match). Returns "ok: launched NAME (ID)" or "error: REASON". The launch itself is posted to ghostty-dalamud

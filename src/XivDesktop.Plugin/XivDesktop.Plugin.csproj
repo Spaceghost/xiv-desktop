@@ -10,10 +10,6 @@
     <Compile Include="..\Shared\GameCursor.cs" Link="Shared\GameCursor.cs" />
   </ItemGroup>
   <ItemGroup>
-    <!-- The arcade's host helper travels inside the DLL; the plugin writes it to ~/.config/xiv-arcade/ on the host. -->
-    <EmbeddedResource Include="..\..\tools\xiv-arcade" LogicalName="xiv-arcade" />
-  </ItemGroup>
-  <ItemGroup>
     <!-- Native (AtkUnitBase) dialogue and picker for Ask an NPC. MIT, github.com/MidoriKami/KamiToolKit; built for Dalamud API 15. -->
     <PackageReference Include="KamiToolKit" Version="2.2.48" />
   </ItemGroup>

@@ -17,7 +17,7 @@ Statuses mean the same thing in every one of these mods:
 
 Everything here is merged into master. BETA means exactly that and no more: merged, and not yet seen working in the game.
 
-* `/arcade`: a library of your own classic games, Final Fantasy first, that start in RetroArch on the Linux host and show up as a game panel. `/arcade ff7` plays the closest match, `/arcade last` resumes, and the palette finds games by name. The first run is three steps that tick themselves off, above a text-only Final Fantasy shelf that lights up as your files appear; a LaunchBox folder can be copied in as it is. Every save and save state lives in one folder that Syncthing copies between your machines: a game never starts while saves are still arriving, a conflict keeps both saves with the newer one live, and `/arcade import-saves` never overwrites a newer save. XivDesktop downloads no games, BIOS files or artwork, installs nothing and pairs no device; it shows the command for each step. Not yet seen in game, with a real emulator, or syncing between two machines; FFXIV also reacts to the controller while you play. See docs/ARCADE.md.
+* `/arcade` moved out of XivDesktop into its own mod, XivArcade, before it was ever released here. Your `~/Games/Arcade` folder, library and save-sync setup carry over untouched. When both mods are installed, the launcher palette still finds your classic games by name (an `Arcade` badge), through XivArcade's IPC; XivDesktop no longer has the `/arcade` command or window itself.
 
 ## [1.0.1] — Released 2026-09-20
 
