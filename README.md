@@ -1,8 +1,33 @@
-# XivDesktop
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="images/readme/hero-dark.png">
+    <source media="(prefers-color-scheme: light)" srcset="images/readme/hero-light.png">
+    <img src="images/readme/hero-dark.png" width="100%" alt="XivDesktop: your apps, in the world. A crystal above a floating desktop window with a grid of app tiles, beside glass cards showing a launcher palette query, Super+D and a row of workspaces.">
+  </picture>
+</p>
 
-![XivDesktop project banner](images/banner.png)
+<h1 align="center">XivDesktop</h1>
 
-**Your Linux applications, organized inside FINAL FANTASY XIV.**
+<p align="center"><em>Your Linux applications, organized inside FINAL FANTASY XIV.</em></p>
+
+<p align="center">
+  <a href="https://github.com/Spaceghost/xivdesktop-dalamud/actions/workflows/ci.yml"><img alt="CI" src="https://img.shields.io/github/actions/workflow/status/Spaceghost/xivdesktop-dalamud/ci.yml?branch=master&style=flat-square&labelColor=0b1226&label=CI"></a>
+  <a href="https://github.com/Spaceghost/xivdesktop-dalamud/actions/workflows/quality.yml"><img alt="quality" src="https://img.shields.io/github/actions/workflow/status/Spaceghost/xivdesktop-dalamud/quality.yml?branch=master&style=flat-square&labelColor=0b1226&label=quality"></a>
+  <a href="https://github.com/Spaceghost/xivdesktop-dalamud/actions/workflows/battery.yml"><img alt="battery" src="https://img.shields.io/github/actions/workflow/status/Spaceghost/xivdesktop-dalamud/battery.yml?branch=master&style=flat-square&labelColor=0b1226&label=battery"></a>
+  <a href="https://github.com/Spaceghost/xivdesktop-dalamud/actions/workflows/codeql.yml"><img alt="CodeQL" src="https://img.shields.io/github/actions/workflow/status/Spaceghost/xivdesktop-dalamud/codeql.yml?branch=master&style=flat-square&labelColor=0b1226&label=CodeQL"></a>
+  <a href="https://github.com/Spaceghost/xivdesktop-dalamud/actions/workflows/scorecard.yml"><img alt="scorecard" src="https://img.shields.io/github/actions/workflow/status/Spaceghost/xivdesktop-dalamud/scorecard.yml?branch=master&style=flat-square&labelColor=0b1226&label=scorecard"></a>
+  <br>
+  <a href="https://github.com/Spaceghost/xivdesktop-dalamud/releases"><img alt="Latest release" src="https://img.shields.io/github/v/release/Spaceghost/xivdesktop-dalamud?include_prereleases&sort=semver&style=flat-square&labelColor=0b1226&color=3a9be0&label=release"></a>
+  <a href="https://github.com/goatcorp/Dalamud"><img alt="Dalamud API level 15" src="https://img.shields.io/badge/Dalamud-API_15-d6a854?style=flat-square&labelColor=0b1226"></a>
+  <a href="https://spacegho.st/mods/ffxiv/plugins/"><img alt="Install from the plugin repository" src="https://img.shields.io/badge/install-testing_builds-d6a854?style=flat-square&labelColor=0b1226"></a>
+  <a href="#install"><img alt="Platform: Linux (Wine)" src="https://img.shields.io/badge/platform-Linux_(Wine)-3a9be0?style=flat-square&labelColor=0b1226"></a>
+</p>
+
+<p align="center">
+  <a href="https://spacegho.st/mods/ffxiv/xivdesktop/">Minisite</a> &nbsp;·&nbsp; <a href="#requirements">Requirements</a> &nbsp;·&nbsp; <a href="#install">Install</a> &nbsp;·&nbsp; <a href="#first-success">First success</a> &nbsp;·&nbsp; <a href="#in-game">Commands</a> &nbsp;·&nbsp; <a href="#troubleshooting">Troubleshooting</a> &nbsp;·&nbsp; <a href="GUIDE.md">Full guide</a> &nbsp;·&nbsp; <a href="https://spacegho.st/mods/ffxiv/term/vote/">Vote</a>
+</p>
+
+<p align="center"><img src="images/readme/divider.svg" width="320" alt=""></p>
 
 XivDesktop is a Dalamud launcher for the Linux host's apps: search, favourites,
 recents, a keyboard-first palette, window/workspace controls and optional Umbra
@@ -10,41 +35,78 @@ widgets. **It does not render or stream application windows.** A compatible
 [Ghostty for Dalamud](https://github.com/Spaceghost/ghostty-dalamud) build and
 its host agent supply the compositor and world panels.
 
+> [!IMPORTANT]
 > **Status: experimental, not verified in game.** The project targets Dalamud
 > API 15 / .NET 10. Host tests exercise catalog/search, calculator, key chords,
 > workspaces and IPC payloads; the scanner has been exercised on a Linux host.
 > These do not verify Wine input, a running Ghostty backend, visible windows,
 > NPC/session interfaces or either Umbra widget. In-game descriptions below
 > are implemented intent and checks to perform, not observed results.
+> [What is verified](#what-is-verified) has the table.
 
-[Requirements](#requirements) · [Install](#install-from-the-plugin-repository) ·
-[First success](#first-success) · [Commands](#in-game) ·
-[Troubleshooting](#troubleshooting) · [Full guide](GUIDE.md)
+## At a glance
 
-## What you get
+<table>
+<tr>
+<td width="50%" valign="top">
 
-| Surface | Purpose and boundary |
-| --- | --- |
-| Launcher palette | Search apps and panels, run actions, or use a bounded calculator. Opens with `/desktop`; Super+D is a configurable shortcut. |
-| App grid | Icons, favourites and recent apps. A populated catalog does not prove that the agent can launch a window. |
-| Workspaces and panel controls | Nine workspaces, focus, close and placement through Ghostty IPC. Advanced operations require the corresponding methods in the installed Ghostty build. |
-| Umbra Apps / Windows widgets | Optional launcher and taskbar clients of XivDesktop's IPC; neither replaces the required Ghostty backend. |
-| NPC / Claude interfaces | Experimental local-model dialogue and Claude Code sessions. They add their own backend, permission and runtime requirements; neither is needed for the app catalog. |
+**Launcher palette**<br>
+Search apps and panels, run actions, or use a bounded calculator. Opens with `/desktop`; Super+D is a configurable shortcut.
+
+</td>
+<td width="50%" valign="top">
+
+**App grid**<br>
+Icons, favourites and recent apps. A populated catalog does not prove that the agent can launch a window.
+
+</td>
+</tr>
+<tr>
+<td width="50%" valign="top">
+
+**Workspaces and panel controls**<br>
+Nine workspaces, focus, close and placement through Ghostty IPC. Advanced operations require the corresponding methods in the installed Ghostty build.
+
+</td>
+<td width="50%" valign="top">
+
+**Umbra Apps / Windows widgets**<br>
+Optional launcher and taskbar clients of XivDesktop's IPC; neither replaces the required Ghostty backend.
+
+</td>
+</tr>
+<tr>
+<td width="50%" valign="top">
+
+**NPC / Claude interfaces**<br>
+Experimental local-model dialogue and Claude Code sessions. They add their own backend, permission and runtime requirements; neither is needed for the app catalog.
+
+</td>
+<td width="50%" valign="top">
+
+**Queued is not completed**<br>
+`Launch` returning `ok` means Ghostty accepted the handoff, not that a window appeared. This README says what was checked and what was not.
+
+</td>
+</tr>
+</table>
 
 ## How it fits together
 
-```text
-FINAL FANTASY XIV under Wine
-  /desktop / palette / optional Umbra widgets
-        |
-  XivDesktop plugin
-        +-- catalog: host agent's app list; filesystem scan as fallback
-        +-- search, favourites, recents, workspace bookkeeping
-        `-- GhosttyDalamud.v1.Call / fallback Post
-                  |
-          compatible Ghostty plugin --> ghostty-agent on Linux
-                                           `-- compositor --> host applications
-                                               windows shown as game panels
+```mermaid
+flowchart LR
+  subgraph game["FINAL FANTASY XIV under Wine"]
+    direction LR
+    inputs["/desktop<br/>palette<br/>key chords<br/>Umbra widgets<br/>other plugins"]
+    inputs -- "XivDesktop.v1.*" --> xd
+    subgraph xd["XivDesktop plugin"]
+      direction TB
+      catalog["<b>Catalog</b><br/>host agent's app list<br/>filesystem scan as fallback"]
+      book["<b>Bookkeeping</b><br/>search · favourites · recents<br/>nine workspaces"]
+    end
+    xd -- "GhosttyDalamud.v1.Call<br/>fallback: Post" --> ghostty["<b>Compatible Ghostty plugin</b><br/>windows shown as game panels"]
+  end
+  ghostty <--> agent["<b>ghostty-agent</b><br/>on the Linux host<br/>--windows wayland<br/>compositor → host applications"]
 ```
 
 Applications execute **on the Linux host**, not inside Wine. XivDesktop reads
@@ -73,7 +135,12 @@ Without Ghostty, the catalog can still be useful, but launching is disabled.
 Even when Ghostty IPC is registered, XivDesktop cannot prove from that alone
 that the host agent is running.
 
-## Install (from the plugin repository)
+## Install
+
+Two paths, both supported: one click from the plugin repository, or building it yourself as a dev plugin, which is
+the path the author develops on and stays supported for friends and strangers who want to read the code first.
+
+### One click (plugin repository)
 
 The author's third-party feed is:
 
@@ -95,7 +162,11 @@ option selects early builds. See the
 for the available build. The feed does not install a host compositor for you,
 and inclusion is not official Dalamud-list approval.
 
-## Install (dev plugin)
+> [!NOTE]
+> **XivDesktop is testing-only until its first stable release**, so today it needs `/xlsettings` → **Experimental** →
+> **Get plugin testing builds**. The same is true of Ghostty and XivMcp in the same repository; Almanac has a stable release.
+
+### Build it yourself (dev plugin)
 
 With the pinned SDK and Dalamud reference assemblies available:
 
@@ -244,6 +315,59 @@ Read [NPC dialogue: backend and risks](docs/ASK.md) and
 before enabling them. `/npc` avoids competing with Ghostty's `/ask`; optional
 command claiming must not be mistaken for a universally available integration.
 
+## Screens
+
+Nothing has been captured yet, because nothing has been seen in game yet. These are the named slots from the
+[minisite](https://spacegho.st/mods/ffxiv/xivdesktop/)'s media manifest; a real capture replaces the placeholder of the
+same id in `docs/media/` and nothing else moves.
+
+<table>
+<tr>
+<td width="50%" valign="top"><img src="docs/media/palette.svg" width="100%" alt="Placeholder for 'Super+D' (gif + screenshot): not captured yet"><br><sub><b>Super+D</b> · <code>palette</code></sub></td>
+<td width="50%" valign="top"><img src="docs/media/app-in-world.svg" width="100%" alt="Placeholder for 'A Browser in Limsa' (video): not captured yet"><br><sub><b>A Browser in Limsa</b> · <code>app-in-world</code></sub></td>
+</tr>
+<tr>
+<td width="50%" valign="top"><img src="docs/media/app-grid.svg" width="100%" alt="Placeholder for 'Everything Installed' (screenshot): not captured yet"><br><sub><b>Everything Installed</b> · <code>app-grid</code></sub></td>
+<td width="50%" valign="top"><img src="docs/media/workspaces.svg" width="100%" alt="Placeholder for 'Nine Desks' (gif): not captured yet"><br><sub><b>Nine Desks</b> · <code>workspaces</code></sub></td>
+</tr>
+</table>
+
+<details>
+<summary><b>The other 3 planned shots</b></summary>
+<br>
+
+<table>
+<tr>
+<td width="50%" valign="top"><img src="docs/media/taskbar.svg" width="100%" alt="Placeholder for 'The Taskbar' (screenshot): not captured yet"><br><sub><b>The Taskbar</b> · <code>taskbar</code></sub></td>
+<td width="50%" valign="top"><img src="docs/media/calculator.svg" width="100%" alt="Placeholder for 'Quick Maths' (screenshot): not captured yet"><br><sub><b>Quick Maths</b> · <code>calculator</code></sub></td>
+</tr>
+<tr>
+<td width="50%" valign="top"><img src="docs/media/settings.svg" width="100%" alt="Placeholder for 'Keybinds and Workspaces' (screenshot): not captured yet"><br><sub><b>Keybinds and Workspaces</b> · <code>settings</code></sub></td>
+<td width="50%"></td>
+</tr>
+</table>
+
+</details>
+
+## What is verified
+
+● yes &nbsp;·&nbsp; ◐ partly &nbsp;·&nbsp; ○ no &nbsp;·&nbsp; — does not apply. **Seen in game** means observed on that build in a running game; a passing host test never earns it.
+
+| Area | Built | Host tests | Seen in game | Notes |
+| --- | :---: | :---: | :---: | --- |
+| Catalog and search: `.desktop` parsing, ranking, favourites and recents | ● | ● | ○ | the scanner has also been exercised on a Linux host; that does not establish what a sandboxed game sees through Wine |
+| Palette logic and the calculator | ● | ● | ○ | the window has not been observed in game |
+| Key chords | ● | ● | ○ | Wine input is unverified, including whether Super reaches the game at all |
+| Workspaces | ● | ● | ○ | hiding and moving panels against a running Ghostty backend is unobserved |
+| IPC payloads (`XivDesktop.v1.*`) | ● | ● | ○ | no companion has been observed calling the gates in game |
+| Launching through a running Ghostty backend; visible windows | ● | ◐ | ○ | some panel and HUD shapes remain integration assumptions |
+| `/npc` and `/claude` interfaces | ● | ◐ | ○ | session persistence, re-attachment and NPC spawning are intended behaviour, not observations |
+| Umbra Apps and Windows widgets | ● | ○ | ○ | layout and Umbra integration unverified, including a reflection-based popup workaround |
+| Clipboard and file drops, saved layouts, placement per zone, GNOME/KDE bridges | ○ | — | — | plans, not shipped integrations |
+
+In-game descriptions in this README are implemented intent and checks to perform, not observed results.
+
+
 ## IPC and companion boundaries
 
 [`src/Shared/IpcContract.cs`](src/Shared/IpcContract.cs) defines the versioned
@@ -326,3 +450,42 @@ Maintained by [Spaceghost](https://github.com/Spaceghost). This is an independen
 third-party project built on Dalamud and Ghostty's plugin/agent infrastructure.
 Preserve dependency attribution and licensing; neither a build nor a feed
 entry establishes official approval.
+
+## The family
+
+Four mods, one plugin repository, one look. They work alone and better together.
+
+<table>
+<tr>
+<td width="96" align="center"><a href="https://github.com/Spaceghost/ghostty-dalamud"><img src="images/readme/family/ghostty.png" width="72" height="72" alt="Ghostty for FFXIV icon"></a></td>
+<td valign="top"><b><a href="https://github.com/Spaceghost/ghostty-dalamud">Ghostty for FFXIV</a></b><br>A real terminal in the game: a glass dropdown, tabs, and screens you pin in the world.<br><sub><a href="https://spacegho.st/mods/ffxiv/term/">minisite</a> · <a href="https://github.com/Spaceghost/ghostty-dalamud"><code>Spaceghost/ghostty-dalamud</code></a></sub></td>
+</tr>
+<tr>
+<td width="96" align="center"><a href="https://github.com/Spaceghost/xivmcp-dalamud"><img src="images/readme/family/xivmcp.png" width="72" height="72" alt="XivMcp icon"></a></td>
+<td valign="top"><b><a href="https://github.com/Spaceghost/xivmcp-dalamud">XivMcp</a></b><br>An MCP server inside the game, so your own AI client can read it and, with your approval, act.<br><sub><a href="https://spacegho.st/mods/ffxiv/xivmcp/">minisite</a> · <a href="https://github.com/Spaceghost/xivmcp-dalamud"><code>Spaceghost/xivmcp-dalamud</code></a></sub></td>
+</tr>
+<tr>
+<td width="96" align="center"><a href="https://github.com/Spaceghost/xivdesktop-dalamud"><img src="images/readme/family/xivdesktop.png" width="72" height="72" alt="XivDesktop icon"></a></td>
+<td valign="top"><b><a href="https://github.com/Spaceghost/xivdesktop-dalamud">XivDesktop</a></b> &nbsp;<sub>(you are here)</sub><br>A launcher, workspaces and a taskbar for Linux desktop apps shown as panels in the world.<br><sub><a href="https://spacegho.st/mods/ffxiv/xivdesktop/">minisite</a> · <a href="https://github.com/Spaceghost/xivdesktop-dalamud"><code>Spaceghost/xivdesktop-dalamud</code></a></sub></td>
+</tr>
+<tr>
+<td width="96" align="center"><a href="https://github.com/Spaceghost/almanac-dalamud"><img src="images/readme/family/almanac.png" width="72" height="72" alt="Almanac icon"></a></td>
+<td valign="top"><b><a href="https://github.com/Spaceghost/almanac-dalamud">Almanac</a></b><br>A model on your own GPU, in game chat, with XivMcp's tools and a community benchmark.<br><sub><a href="https://spacegho.st/mods/ffxiv/almanac/about/">minisite</a> · <a href="https://github.com/Spaceghost/almanac-dalamud"><code>Spaceghost/almanac-dalamud</code></a></sub></td>
+</tr>
+</table>
+
+<p align="center"><img src="images/readme/divider.svg" width="320" alt=""></p>
+
+<p align="center">
+  <a href="https://spacegho.st/mods/ffxiv/">All mods</a> &nbsp;·&nbsp;
+  <a href="https://spacegho.st/mods/ffxiv/xivdesktop/">XivDesktop minisite</a> &nbsp;·&nbsp;
+  <a href="https://spacegho.st/mods/ffxiv/plugins/">Plugin repository</a> &nbsp;·&nbsp;
+  <a href="https://spacegho.st/mods/ffxiv/term/vote/">Vote on features</a> &nbsp;·&nbsp;
+  <a href="https://spacegho.st/mods/ffxiv/term/gallery/">Gallery</a> &nbsp;·&nbsp;
+  <a href="https://spacegho.st/mods/ffxiv/almanac/">Model leaderboard</a> &nbsp;·&nbsp;
+  <a href="https://github.com/Spaceghost/xivdesktop-dalamud/releases">Changelog</a>
+</p>
+
+<p align="center"><sub>Made by <b>Johnneylee Jack Rollins</b> · <a href="https://github.com/Spaceghost">github.com/Spaceghost</a><br>
+FINAL FANTASY XIV © SQUARE ENIX CO., LTD. These are independent fan projects, not affiliated with or endorsed by Square Enix, Dalamud or XIVLauncher.</sub></p>
+
