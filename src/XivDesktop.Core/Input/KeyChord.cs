@@ -36,9 +36,26 @@ public readonly record struct KeyChord(KeyMods Mods, int Key)
 
     private static readonly Dictionary<string, int> Aliases = new(StringComparer.OrdinalIgnoreCase)
     {
-        ["return"] = 0x0D, ["ret"] = 0x0D, ["esc"] = 0x1B, ["del"] = 0x2E, ["ins"] = 0x2D, ["pgup"] = 0x21, ["pgdn"] = 0x22,
-        ["pagedn"] = 0x22, ["-"] = 0xBD, ["="] = 0xBB, [","] = 0xBC, ["."] = 0xBE, ["/"] = 0xBF, [";"] = 0xBA, ["`"] = 0xC0,
-        ["["] = 0xDB, ["]"] = 0xDD, ["\\"] = 0xDC, ["'"] = 0xDE, ["bksp"] = 0x08,
+        ["return"] = 0x0D,
+        ["ret"] = 0x0D,
+        ["esc"] = 0x1B,
+        ["del"] = 0x2E,
+        ["ins"] = 0x2D,
+        ["pgup"] = 0x21,
+        ["pgdn"] = 0x22,
+        ["pagedn"] = 0x22,
+        ["-"] = 0xBD,
+        ["="] = 0xBB,
+        [","] = 0xBC,
+        ["."] = 0xBE,
+        ["/"] = 0xBF,
+        [";"] = 0xBA,
+        ["`"] = 0xC0,
+        ["["] = 0xDB,
+        ["]"] = 0xDD,
+        ["\\"] = 0xDC,
+        ["'"] = 0xDE,
+        ["bksp"] = 0x08,
     };
 
     public static bool IsModifierKey(int vk) => vk is VkShift or VkControl or VkMenu or VkLWin or VkRWin
