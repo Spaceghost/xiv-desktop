@@ -34,11 +34,10 @@ public sealed class CommandRunner
     /// <summary>The Claude sessions, once they are wired up.</summary>
     public Claude.ClaudeService? Claude { get; set; }
 
-    /// <summary>The arcade, once it is wired up.</summary>
-    public Arcade.ArcadeService? Arcade { get; set; }
+    /// <summary>The optional XivArcade mod's IPC: search its games, and start one by id. Both do nothing when it is absent.</summary>
+    public Func<string, IReadOnlyList<ArcadeHit>> ArcadeSearch { get; set; } = _ => [];
 
-    /// <summary>Opens the arcade window.</summary>
-    public Action ShowArcade { get; set; } = () => { };
+    public Func<string, string> ArcadeLaunch { get; set; } = _ => "error: XivArcade is not installed";
 
     /// <summary>Brings the Claude panel up.</summary>
     public Action ShowClaude { get; set; } = () => { };
@@ -59,8 +58,7 @@ public sealed class CommandRunner
             GhosttyAvailable = desktop.Backend.Available,
             WindowsAvailable = session.Windows.WindowsAvailable,
             CanLaunch = a => desktop.CanLaunch(a, out _),
-            ArcadeGames = Arcade?.State.Games ?? [],
-            ArcadeSystemName = id => Arcade?.State.SystemName(id) ?? id,
+            ArcadeSearch = ArcadeSearch,
             ClaudeAvailable = Claude is { Transport.Ready: true },
             ClaudeReason = Claude == null ? "the Claude panel is not loaded"
                 : Claude.Transport.Ready ? null
@@ -118,15 +116,7 @@ public sealed class CommandRunner
                     ToggleGrid("");
                     return "ok";
                 case PaletteCommand.Arcade:
-                    if (Arcade == null)
-                        return "error: the arcade is not loaded";
-                    if (c.Arg.Length == 0)
-                    {
-                        ShowArcade();
-                        return "ok";
-                    }
-
-                    return Arcade.State.Game(c.Arg) is { } game ? Arcade.Play(game) : "error: that game is no longer in the library";
+                    return ArcadeLaunch(c.Arg);
                 case PaletteCommand.Claude:
                     if (Claude == null)
                         return "error: the Claude panel is not loaded";

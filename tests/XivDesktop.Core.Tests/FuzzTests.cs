@@ -45,6 +45,7 @@ public sealed class FuzzTests
                 GhosttyWire.ParseWindowList(reply);
                 GhosttyWire.ParseAgentStatus(text);
                 Panels.ParseList(text);
+                Palette.ArcadeLink.Parse(text);
                 DesktopEntryParser.Parse(text, "fuzz");
                 KeyChord.TryParse(text, out _);
             }

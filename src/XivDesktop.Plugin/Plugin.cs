@@ -3,8 +3,6 @@ using Dalamud.Interface.ImGuiNotification;
 using Dalamud.Interface.Windowing;
 using Dalamud.Plugin;
 using Dalamud.Plugin.Services;
-using XivDesktop.Core.Arcade;
-using XivDesktop.Plugin.Arcade;
 using XivDesktop.Plugin.Claude;
 using XivDesktop.Plugin.Ask;
 using XivDesktop.Plugin.Ipc;
@@ -24,8 +22,6 @@ public sealed class Plugin : IDalamudPlugin
     /// <summary>The Claude panel: <c>/claude</c>, <c>/claude &lt;prompt&gt;</c>, new, list, resume, look.</summary>
     public const string ClaudeCommandName = "/claude";
 
-    public const string ArcadeCommandName = "/arcade";
-
     private readonly IDalamudPluginInterface pluginInterface;
     private readonly IPluginLog log;
     private readonly IFramework framework;
@@ -42,9 +38,6 @@ public sealed class Plugin : IDalamudPlugin
     private readonly ClaudeWindow claudePanel = null!;
     private readonly ClaudePermissionWindow claudePermission = null!;
     private readonly ClaudeService claude = null!;
-    private readonly ArcadeService arcade = null!;
-    private readonly ArcadeWindow arcadeWindow = null!;
-    private bool arcadeCommandRegistered;
     private readonly INotificationManager notifications;
     private readonly AskModule? ask;
     private bool commandRegistered;
@@ -81,6 +74,12 @@ public sealed class Plugin : IDalamudPlugin
             session = Track(new SessionService(ghostty, ghostty.Post, desktop, config, framework, notifications, log));
             var runner = new CommandRunner(desktop, session, commands, log);
 
+            // XivArcade is a separate, optional mod: when it is loaded, the palette finds its games over IPC.
+            var arcadeSearch = pluginInterface.GetIpcSubscriber<string, string>(XivDesktop.Shared.IpcContract.ArcadeSearch);
+            var arcadeLaunch = pluginInterface.GetIpcSubscriber<string, string>(XivDesktop.Shared.IpcContract.ArcadeLaunch);
+            runner.ArcadeSearch = query => ArcadeCall(arcadeSearch, query) is { } json ? XivDesktop.Core.Palette.ArcadeLink.Parse(json) : [];
+            runner.ArcadeLaunch = id => ArcadeCall(arcadeLaunch, id) ?? "error: XivArcade is not installed";
+
             launcher = new LauncherWindow(desktop, textures, config);
             palette = new PaletteWindow(runner, desktop, session, textures, pluginInterface, config);
             runner.TogglePalette = palette.Toggle;
@@ -104,15 +103,7 @@ public sealed class Plugin : IDalamudPlugin
             runner.ShowClaude = claudePanel.Show;
             settings.Claude = claude;
 
-            // The arcade: the player's own classic games through the host helper, as game panels.
-            arcade = Track(new ArcadeService(framework, log, catalog.CurrentPaths, ghostty, claude.Transport));
-            arcadeWindow = new ArcadeWindow(arcade, textures, catalog.CurrentPaths);
-            arcade.Message += OnArcadeMessage;
-            runner.Arcade = arcade;
-            runner.ShowArcade = () => arcadeWindow.Show();
-
             windowSystem.AddWindow(launcher);
-            windowSystem.AddWindow(arcadeWindow);
             windowSystem.AddWindow(palette);
             windowSystem.AddWindow(settings);
             windowSystem.AddWindow(claudePanel);
@@ -131,11 +122,6 @@ public sealed class Plugin : IDalamudPlugin
                 HelpMessage = "Open the Claude panel. \"/claude <prompt>\" asks, \"/claude new [name]\", \"/claude list\", "
                     + "\"/claude resume [name]\", \"/claude <name> <prompt>\", \"/claude stop\", \"/claude end [name]\", \"/claude look [name] [seed]\".",
             });
-            arcadeCommandRegistered = commands.AddHandler(ArcadeCommandName, new CommandInfo(OnArcadeCommand)
-            {
-                HelpMessage = "Your own classic games as game panels, saves kept in step across machines. " + ArcadeText.Help,
-            });
-
             // Ask an NPC: /ask, XivDesktop.v1.Ask, the summoned speaker and its dialogue (Ask/).
             ask = Track(new AskModule(pluginInterface, framework, commands, chat, log, data, clientState, condition, objects, textures,
                 windowSystem, config, () => ghostty.Post.Available, line => ghostty.Post.Post(line)));
@@ -150,6 +136,20 @@ public sealed class Plugin : IDalamudPlugin
             // Dalamud does not call Dispose when the constructor throws; release what was acquired.
             DisposeCore();
             throw;
+        }
+    }
+
+    /// <summary>Null when XivArcade is not loaded, or the call failed.</summary>
+    private string? ArcadeCall(Dalamud.Plugin.Ipc.ICallGateSubscriber<string, string> gate, string argument)
+    {
+        try
+        {
+            return gate.HasFunction ? gate.InvokeFunc(argument) : null;
+        }
+        catch (Exception ex)
+        {
+            log.Debug(ex, "XivDesktop: XivArcade IPC failed");
+            return null;
         }
     }
 
@@ -328,68 +328,6 @@ public sealed class Plugin : IDalamudPlugin
         }
     }
 
-    private void OnArcadeCommand(string command, string arguments)
-    {
-        try
-        {
-            var request = ArcadeRequest.Parse(arguments);
-            switch (request.Verb)
-            {
-                case ArcadeVerb.Open:
-                    arcadeWindow.Show();
-                    return;
-                case ArcadeVerb.Help:
-                    Print(ArcadeText.Help + " " + ArcadeText.Legal);
-                    return;
-                case ArcadeVerb.Setup:
-                    arcadeWindow.ShowSetup();
-                    break;
-                case ArcadeVerb.List:
-                    PrintArcadeList();
-                    return;
-            }
-
-            var result = arcade.Run(request);
-            Print(result == "ok" ? request.Verb switch
-            {
-                ArcadeVerb.Sync => "syncing saves… " + arcade.State.Sync.Label,
-                ArcadeVerb.Setup => "checking folders, emulator and games…",
-                ArcadeVerb.Rescan => "rescanning your games folder…",
-                _ => "asked the host; the result follows",
-            }
-            : result);
-            if (request.Verb == ArcadeVerb.Setup)
-            {
-                foreach (var c in arcade.State.Checks)
-                    Print($"[{(c.Ok ? "x" : " ")}] {c.Title}: {c.Detail}");
-            }
-        }
-        catch (Exception ex)
-        {
-            log.Error(ex, "{Command} failed", ArcadeCommandName);
-        }
-    }
-
-    private void PrintArcadeList()
-    {
-        var state = arcade.State;
-        if (state.Games.Count == 0)
-        {
-            Print("no games yet. Drop your own game files into " + (state.GamesRoot.Length > 0 ? state.GamesRoot : "your games folder") + ". " + ArcadeText.Legal);
-            return;
-        }
-
-        foreach (var group in state.Games.GroupBy(g => g.System))
-            Print(state.SystemName(group.Key) + ": " + string.Join("; ", group.Select(g => g.Title + (g.Ready ? "" : " (core missing)"))));
-        Print("saves: " + state.Sync.Label);
-    }
-
-    private void OnArcadeMessage(string message)
-    {
-        Print("arcade: " + message);
-        arcadeWindow.Flash(message);
-    }
-
     private void PrintClaudeSessions()
     {
         var open = claude.Sessions;
@@ -448,15 +386,6 @@ public sealed class Plugin : IDalamudPlugin
             commands.RemoveHandler(Command);
             commandRegistered = false;
         }
-
-        if (arcadeCommandRegistered)
-        {
-            commands.RemoveHandler(ArcadeCommandName);
-            arcadeCommandRegistered = false;
-        }
-
-        if (arcade != null)
-            arcade.Message -= OnArcadeMessage;
 
         if (claudeCommandRegistered)
         {
