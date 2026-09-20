@@ -34,6 +34,12 @@ public sealed class CommandRunner
     /// <summary>The Claude sessions, once they are wired up.</summary>
     public Claude.ClaudeService? Claude { get; set; }
 
+    /// <summary>The arcade, once it is wired up.</summary>
+    public Arcade.ArcadeService? Arcade { get; set; }
+
+    /// <summary>Opens the arcade window.</summary>
+    public Action ShowArcade { get; set; } = () => { };
+
     /// <summary>Brings the Claude panel up.</summary>
     public Action ShowClaude { get; set; } = () => { };
 
@@ -53,6 +59,8 @@ public sealed class CommandRunner
             GhosttyAvailable = desktop.Backend.Available,
             WindowsAvailable = session.Windows.WindowsAvailable,
             CanLaunch = a => desktop.CanLaunch(a, out _),
+            ArcadeGames = Arcade?.State.Games ?? [],
+            ArcadeSystemName = id => Arcade?.State.SystemName(id) ?? id,
             ClaudeAvailable = Claude is { Transport.Ready: true },
             ClaudeReason = Claude == null ? "the Claude panel is not loaded"
                 : Claude.Transport.Ready ? null
@@ -109,6 +117,16 @@ public sealed class CommandRunner
                 case PaletteCommand.Grid:
                     ToggleGrid("");
                     return "ok";
+                case PaletteCommand.Arcade:
+                    if (Arcade == null)
+                        return "error: the arcade is not loaded";
+                    if (c.Arg.Length == 0)
+                    {
+                        ShowArcade();
+                        return "ok";
+                    }
+
+                    return Arcade.State.Game(c.Arg) is { } game ? Arcade.Play(game) : "error: that game is no longer in the library";
                 case PaletteCommand.Claude:
                     if (Claude == null)
                         return "error: the Claude panel is not loaded";

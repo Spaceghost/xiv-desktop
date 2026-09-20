@@ -465,6 +465,7 @@ public sealed class PaletteWindow : Window
 
         var glyph = item.Provider switch
         {
+            _ when item.Command.Kind == PaletteCommand.Arcade => FontAwesomeIcon.Gamepad,
             PaletteProvider.Calc => FontAwesomeIcon.Calculator,
             PaletteProvider.Command => item.Command.Arg.StartsWith("ask", StringComparison.Ordinal) ? FontAwesomeIcon.CommentDots : FontAwesomeIcon.Terminal,
             PaletteProvider.Action => item.Command.Kind switch
