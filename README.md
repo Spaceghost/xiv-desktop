@@ -323,6 +323,17 @@ a chord by pressing it. GNOME/KDE/phone-style desktop bridges are **plans**, not
 shipped integrations. See [architecture](docs/ARCHITECTURE.md) and the
 [full guide](GUIDE.md) for requirements and roadmap detail.
 
+## Releasing
+
+```sh
+tools/release.sh test            # the next testing build, from master as it is
+tools/release.sh stable X.Y.Z    # the stable release X.Y.Z
+```
+
+One command: it checks the tree and CI, writes the version everywhere it lives, dates
+the changelog, tags, pushes, waits for the Release workflow, and verifies the published
+files and the live listing. `-n` is a dry run. See [docs/RELEASING.md](docs/RELEASING.md).
+
 ## Documentation and support
 
 [GUIDE.md](GUIDE.md) preserves the previous detailed README at the repository
