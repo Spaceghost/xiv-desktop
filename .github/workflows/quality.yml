@@ -1,5 +1,6 @@
-# Tests and a secret scan on every push and pull request, fuzzing of the
-# parsers every night. GitHub-hosted runners, no secrets: pull requests from forks run the same jobs.
+# A secret scan on every push and pull request, fuzzing of the parsers every night.
+# The tests and the build live in ci.yml and are not repeated here. GitHub-hosted
+# runners, no secrets: pull requests from forks run the same jobs.
 name: Quality
 
 on:
@@ -23,19 +24,6 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  test:
-    if: github.event_name != 'schedule'
-    runs-on: ubuntu-latest
-    timeout-minutes: 20
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-      - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
-        with:
-          global-json-file: global.json
-      - run: dotnet test tests/XivDesktop.Core.Tests
-
   secrets:
     if: github.event_name != 'schedule'
     runs-on: ubuntu-latest
