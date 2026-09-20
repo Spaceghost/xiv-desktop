@@ -24,7 +24,7 @@
     <RootNamespace>Umbra.XivDesktop</RootNamespace>
     <AssemblyName>Umbra.XivDesktop</AssemblyName>
     <Version>0.1.0.0</Version>
-    <Authors>xiv-desktop contributors</Authors>
+    <Authors>Johnneylee Jack Rollins</Authors>
     <Description>Umbra toolbar "Apps" launcher for the XivDesktop plugin (talks to it over Dalamud IPC).</Description>
     <IsPackable>false</IsPackable>
     <DebugType>portable</DebugType>
