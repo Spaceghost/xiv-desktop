@@ -292,6 +292,7 @@ public sealed unsafe class AskService : IDisposable
         if (!config.AskSpawnNpc)
         {
             ActorNote = "NPC off in settings";
+            log.Information("XivDesktop ask: no NPC, dialogue only (NPC off in settings)");
             return;
         }
 
@@ -306,6 +307,7 @@ public sealed unsafe class AskService : IDisposable
         if (player is null)
         {
             ActorNote = "not logged in";
+            log.Information("XivDesktop ask: no NPC, dialogue only (not logged in)");
             return;
         }
 
@@ -345,7 +347,12 @@ public sealed unsafe class AskService : IDisposable
             var p = player.Position;
             follower.Spawn(p.X, p.Y, p.Z, player.Rotation);
             var pos = new Vector3((float)follower.X, p.Y, (float)follower.Z);
-            actor = LocalActor.Spawn(look, copy, DisplayName(assistant: true), pos, (float)follower.Yaw, out var error);
+            var bnpc = look is { IsHuman: false } ? Sheets.BNpcBaseForModel((uint)look.ModelCharaId) : 0u;
+            var exact = bnpc != 0;
+            if (!exact && look is { IsHuman: false })
+                bnpc = Sheets.AnyCreatureBase();
+            log.Information("XivDesktop ask: building {Speaker} from creature row {BNpc} (exact model match {Exact}; model {Model})", speaker.Key, bnpc, exact, look?.ModelCharaId ?? 0);
+            actor = LocalActor.Spawn(look, copy, DisplayName(assistant: true), pos, (float)follower.Yaw, out var error, bnpc, exact);
             if (actor is null)
             {
                 ActorNote = error;
@@ -353,7 +360,7 @@ public sealed unsafe class AskService : IDisposable
             }
             else
             {
-                log.Debug("XivDesktop ask: spawned {Speaker} as a local character", speaker.Key);
+                log.Information("XivDesktop ask: spawned {Speaker} ({Source}, human {Human}) at {Pos}, player at {Player}", speaker.Key, speaker.Source, humanoid, pos, p);
             }
         }
         catch (Exception ex)
@@ -551,11 +558,23 @@ public sealed unsafe class AskService : IDisposable
             pendingCues.Enqueue(c);
     }
 
+    private float describeIn;
+
     private void TickActor(float dt, bool talking)
     {
         if (actor is null)
             return;
-        if (!actor.Tick(dt))
+        var wasDrawn = actor.Drawn;
+        var alive = actor.Tick(dt);
+        if (alive && !wasDrawn && actor.Drawn)
+        {
+            log.Information("XivDesktop ask: NPC model ready, drawing enabled at {Pos}", actor.Position);
+            describeIn = 3.5f;
+        }
+
+        if (alive && describeIn > 0 && (describeIn -= dt) <= 0)
+            log.Information("XivDesktop ask: NPC a few seconds later: {State}", actor.Describe());
+        if (!alive)
         {
             ActorNote = actor.Alive ? "the character never became drawable" : "the character was removed by the game";
             log.Information("XivDesktop ask: NPC gone ({Why}); dialogue only", ActorNote);

@@ -22,6 +22,57 @@ public sealed class SpeakerSheets
     private List<SpeakerEntry>? pets;
     private Task? scan;
 
+    private readonly Dictionary<uint, uint> bnpcForModel = new();
+
+    /// <summary>
+    /// A creature (BNpcBase row) that uses this model, so the game's own SetupBNpc can build the
+    /// character cleanly: model, size and the rest, with nothing borrowed from the player. 0 = none.
+    /// </summary>
+    public uint BNpcBaseForModel(uint modelCharaId)
+    {
+        if (modelCharaId == 0)
+            return 0;
+        lock (bnpcForModel)
+        {
+            if (bnpcForModel.TryGetValue(modelCharaId, out var known))
+                return known;
+            uint found = 0;
+            foreach (var b in data.GetExcelSheet<BNpcBase>())
+            {
+                if (b.ModelChara.RowId == modelCharaId)
+                {
+                    found = b.RowId;
+                    break;
+                }
+            }
+
+            bnpcForModel[modelCharaId] = found;
+            return found;
+        }
+    }
+
+    private uint anyCreature;
+
+    /// <summary>
+    /// Some ordinary creature row, for models no creature uses (a delivery moogle is only ever
+    /// an event NPC): SetupBNpc builds a clean character from it and the model is swapped after.
+    /// </summary>
+    public uint AnyCreatureBase()
+    {
+        if (anyCreature != 0)
+            return anyCreature;
+        foreach (var b in data.GetExcelSheet<BNpcBase>())
+        {
+            if (b.RowId > 0 && b.ModelChara.RowId > 0 && b.Scale is > 0.9f and < 1.1f)
+            {
+                anyCreature = b.RowId;
+                break;
+            }
+        }
+
+        return anyCreature;
+    }
+
     public SpeakerSheets(IDataManager data, IFramework framework, IPluginLog log)
     {
         this.data = data;
