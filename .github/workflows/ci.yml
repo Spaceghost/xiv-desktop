@@ -35,6 +35,9 @@ jobs:
       - name: Check the plugin manifest
         run: tools/check-manifest.py
 
+      - name: Check that CHANGELOG.md matches changelog.json
+        run: tools/changelog.py --check
+
       - name: Fetch the Dalamud reference assemblies
         run: tools/fetch-dalamud.sh
 
