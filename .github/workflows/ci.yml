@@ -38,6 +38,9 @@ jobs:
       - name: Check that CHANGELOG.md matches changelog.json
         run: tools/changelog.py --check
 
+      - name: Test the arcade host helper (placeholder files only, no emulator, no network)
+        run: python3 -B -m unittest discover -s tests/arcade
+
       - name: Fetch the Dalamud reference assemblies
         run: tools/fetch-dalamud.sh
 
