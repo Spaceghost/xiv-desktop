@@ -1,0 +1,42 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512">
+  <title>XivDesktop for FFXIV</title>
+  <defs>
+    <radialGradient id="bg" cx="50%" cy="36%" r="78%">
+      <stop offset="0" stop-color="#1f3564"/><stop offset="0.55" stop-color="#0f1c3b"/><stop offset="1" stop-color="#060b1a"/>
+    </radialGradient>
+    <linearGradient id="gold" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#f6e2a4"/><stop offset="0.5" stop-color="#c99a4b"/><stop offset="1" stop-color="#8a6128"/>
+    </linearGradient>
+    <linearGradient id="crystalL" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#bff4ff"/><stop offset="1" stop-color="#2c8fd6"/></linearGradient>
+    <linearGradient id="crystalR" x1="1" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#5cc8f5"/><stop offset="1" stop-color="#16508f"/></linearGradient>
+    <linearGradient id="screen" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#1a2f5c"/><stop offset="1" stop-color="#0a1430"/></linearGradient>
+    <radialGradient id="halo" cx="50%" cy="50%" r="50%"><stop offset="0" stop-color="#7fdcff" stop-opacity="0.55"/><stop offset="1" stop-color="#7fdcff" stop-opacity="0"/></radialGradient>
+    <filter id="glow" x="-60%" y="-60%" width="220%" height="220%"><feGaussianBlur stdDeviation="6" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge></filter>
+    <clipPath id="frame"><rect width="512" height="512" rx="104"/></clipPath>
+  </defs>
+  <g clip-path="url(#frame)">
+    <rect width="512" height="512" fill="url(#bg)"/>
+    <g fill="#cfe8ff"><circle cx="84" cy="96" r="3"/><circle cx="132" cy="62" r="2"/><circle cx="420" cy="84" r="2.5"/><circle cx="444" cy="170" r="2"/><circle cx="70" cy="200" r="2"/><circle cx="392" cy="44" r="1.8"/></g>
+    <!-- the aetheryte it launches from -->
+    <circle cx="256" cy="112" r="112" fill="url(#halo)"/>
+    <path d="M96 122 A160 28 0 0 1 416 122" fill="none" stroke="url(#gold)" stroke-width="9" opacity="0.9"/>
+    <g filter="url(#glow)">
+      <path d="M256 34 L294 100 L256 158 Z" fill="url(#crystalR)"/>
+      <path d="M256 34 L218 100 L256 158 Z" fill="url(#crystalL)"/>
+    </g>
+    <!-- a desktop window, floating in the world: title bar and a grid of apps -->
+    <rect x="86" y="196" width="340" height="236" rx="22" fill="url(#screen)" stroke="url(#gold)" stroke-width="8"/>
+    <path d="M90 244 H422" stroke="url(#gold)" stroke-width="5" opacity="0.8"/>
+    <g fill="#c99a4b"><circle cx="118" cy="221" r="8"/><circle cx="146" cy="221" r="8" opacity="0.7"/><circle cx="174" cy="221" r="8" opacity="0.45"/></g>
+    <g>
+      <rect x="120" y="270" width="60" height="60" rx="14" fill="#5cc8f5" filter="url(#glow)"/>
+      <rect x="196" y="270" width="60" height="60" rx="14" fill="#2c8fd6"/>
+      <rect x="272" y="270" width="60" height="60" rx="14" fill="#c99a4b"/>
+      <rect x="348" y="270" width="48" height="60" rx="14" fill="#1f4b86"/>
+      <rect x="120" y="346" width="60" height="60" rx="14" fill="#1f4b86"/>
+      <rect x="196" y="346" width="60" height="60" rx="14" fill="#f6e2a4"/>
+      <rect x="272" y="346" width="60" height="60" rx="14" fill="#2c8fd6"/>
+      <rect x="348" y="346" width="48" height="60" rx="14" fill="#5cc8f5" opacity="0.8"/>
+    </g>
+  </g>
+</svg>
