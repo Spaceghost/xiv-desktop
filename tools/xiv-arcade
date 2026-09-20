@@ -1251,6 +1251,7 @@ def launch(env: Env, index: Index, sync, query: str, dry_run: bool = False, run=
     argv, core = plan_launch(env, game)
     if dry_run:
         out(shlex.join(argv))
+        write_state(env, index, sync, message="dry run, nothing started: " + shlex.join(argv))
         return 0
     verdict, resolved = settle(sync, index, env.sync_root, wait)
     for r in resolved:
