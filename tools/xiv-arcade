@@ -1,0 +1,1387 @@
+#!/usr/bin/env python3
+"""xiv-arcade: the host side of XivDesktop's /arcade.
+
+Indexes the game files YOU put in your games folder, starts them in RetroArch, and keeps every
+battery save and save state in one directory tree that Syncthing replicates between your machines.
+
+It never downloads, links to or searches for ROMs, disc images or BIOS files. Bring your own dumps
+of games you own. Python 3.9+, standard library only; runs with or without the game.
+
+  xiv-arcade setup            create the folders, READMEs, RetroArch overrides and the database
+  xiv-arcade scan             re-index the games folder
+  xiv-arcade list             what is in the library
+  xiv-arcade launch NAME      fuzzy-launch (add --dry-run to print the exact command and stop)
+  xiv-arcade last             resume the most recent game
+  xiv-arcade setup --launchbox DIR   also read a LaunchBox folder where it lives
+  xiv-arcade import-saves DIR copy saves from another RetroArch install, never over a newer save
+  xiv-arcade sync             force a save sync and show its status
+  xiv-arcade sync-setup       print (or --apply) the Syncthing folder configuration
+  xiv-arcade pair [DEVICE-ID] print this device's id, or the commands that pair another one
+"""
+from __future__ import annotations
+
+import argparse
+import hashlib
+import json
+import os
+import re
+import shlex
+import shutil
+import sqlite3
+import subprocess
+import sys
+import time
+import urllib.error
+import urllib.request
+import xml.etree.ElementTree as ET
+from dataclasses import dataclass, field
+from pathlib import Path
+
+VERSION = 1
+FOLDER_ID = "xiv-arcade-saves"
+RETROARCH_FLATPAK = "org.libretro.RetroArch"
+
+LEGAL = (
+    "XivDesktop never downloads, links to or helps find ROMs, disc images or BIOS files. "
+    "It only reads folders you point it at. Use your own dumps of games you own."
+)
+
+
+# --------------------------------------------------------------------------------------------
+# Systems
+# --------------------------------------------------------------------------------------------
+
+@dataclass(frozen=True)
+class System:
+    id: str
+    name: str
+    folder: str
+    exts: tuple[str, ...]          # extensions that are content for this system
+    unique: tuple[str, ...]        # extensions that identify it outside a system folder
+    cores: tuple[str, ...]         # libretro core stems, preferred first
+    aliases: tuple[str, ...] = ()  # other folder names that mean this system
+    note: str = ""
+
+
+SYSTEMS: tuple[System, ...] = (
+    System("nes", "NES / Famicom", "nes", (".nes", ".fds", ".unf", ".unif"), (".nes", ".fds", ".unf", ".unif"),
+           ("mesen", "nestopia", "fceumm"), ("famicom", "fc", "nintendo", "Nintendo Entertainment System", "Nintendo Famicom", "Nintendo Famicom Disk System")),
+    System("snes", "Super NES / Super Famicom", "snes", (".sfc", ".smc", ".swc", ".fig"), (".sfc", ".smc", ".swc", ".fig"),
+           ("snes9x", "bsnes", "bsnes_hd_beta"), ("sfc", "superfamicom", "supernintendo", "supernes", "Super Nintendo Entertainment System", "Nintendo Super Famicom")),
+    System("gb", "Game Boy", "gb", (".gb",), (".gb",), ("gambatte", "sameboy", "mgba"), ("gameboy", "Nintendo Game Boy")),
+    System("gbc", "Game Boy Color", "gbc", (".gbc",), (".gbc",), ("gambatte", "sameboy", "mgba"), ("gameboycolor", "Nintendo Game Boy Color")),
+    System("gba", "Game Boy Advance", "gba", (".gba",), (".gba",), ("mgba", "vba_next"), ("gameboyadvance", "Nintendo Game Boy Advance")),
+    System("nds", "Nintendo DS", "nds", (".nds",), (".nds",), ("melondsds", "melonds", "desmume"), ("ds", "Nintendo DS")),
+    System("wswan", "WonderSwan", "wonderswan", (".ws", ".wsc"), (".ws", ".wsc"), ("mednafen_wswan",), ("ws", "wsc", "wswan", "WonderSwan Color", "Bandai WonderSwan", "Bandai WonderSwan Color")),
+    System("psx", "PlayStation", "psx", (".cue", ".chd", ".pbp", ".m3u", ".bin", ".img", ".iso", ".ccd"), (".cue", ".m3u", ".ccd"),
+           ("swanstation", "mednafen_psx_hw", "mednafen_psx", "pcsx_rearmed"), ("ps1", "psone", "playstation", "playstation1", "Sony Playstation", "Sony PSone"),
+           "Most PlayStation cores want a BIOS dumped from your own console."),
+    System("ps2", "PlayStation 2", "ps2", (".iso", ".chd", ".cso", ".gz"), (),
+           ("pcsx2",), ("playstation2", "Sony Playstation 2"),
+           "The PS2 core (LRPS2) needs a BIOS dumped from your own console. Standalone PCSX2 is not wired up yet."),
+    System("psp", "PlayStation Portable", "psp", (".iso", ".cso", ".pbp", ".chd"), (),
+           ("ppsspp",), ("playstationportable", "Sony PSP", "Sony Playstation Portable")),
+    System("genesis", "Mega Drive / Genesis", "genesis", (".md", ".gen", ".smd", ".bin"), (".md", ".gen", ".smd"),
+           ("genesis_plus_gx", "picodrive"), ("megadrive", "md", "Sega Genesis", "Sega Mega Drive")),
+    System("n64", "Nintendo 64", "n64", (".z64", ".n64", ".v64"), (".z64", ".n64", ".v64"),
+           ("mupen64plus_next", "parallel_n64"), ("nintendo64", "Nintendo 64")),
+)
+
+SYSTEM_BY_ID = {s.id: s for s in SYSTEMS}
+IMAGE_EXTS = (".png", ".jpg", ".jpeg")
+
+
+def _fold(name: str) -> str:
+    return re.sub(r"[^a-z0-9]", "", name.lower())
+
+
+_FOLDERS = {}
+for _s in SYSTEMS:
+    for _n in (_s.id, _s.folder, *_s.aliases):
+        _FOLDERS[_fold(_n)] = _s
+_UNIQUE = {e: s for s in SYSTEMS for e in s.unique}
+
+
+def detect_system(path: str, root: str = "") -> System | None:
+    """The system a file belongs to: the nearest system-named folder below the games root wins,
+    then an extension only one system uses. An ambiguous image (.iso, .chd, .bin, .pbp) outside a
+    system folder is None: the player has to say which console it is by putting it in a folder."""
+    p = Path(path)
+    ext = p.suffix.lower()
+    try:
+        parts = p.relative_to(root).parts[:-1] if root else p.parts[:-1]
+    except ValueError:
+        parts = p.parts[:-1]
+    for part in reversed(parts):
+        s = _FOLDERS.get(_fold(part))
+        if s is not None:
+            return s if ext in s.exts else None
+    return _UNIQUE.get(ext)
+
+
+# --------------------------------------------------------------------------------------------
+# Titles, discs, playlists
+# --------------------------------------------------------------------------------------------
+
+_DISC = re.compile(r"[\s._-]*[(\[]\s*(?:disc|disk|cd)\s*([0-9]+|[a-d])(?:\s*of\s*[0-9]+)?\s*[)\]]", re.I)
+_TAGS = re.compile(r"\s*[(\[][^)\]]*[)\]]")
+
+
+def disc_number(stem: str) -> int | None:
+    m = _DISC.search(stem)
+    if not m:
+        return None
+    d = m.group(1).lower()
+    return int(d) if d.isdigit() else "abcd".index(d) + 1
+
+
+def strip_disc(stem: str) -> str:
+    return _DISC.sub("", stem).strip()
+
+
+def clean_title(stem: str) -> str:
+    """"Final Fantasy VII (USA) (Disc 1)" -> "Final Fantasy VII"; "Legend of X, The" -> "The Legend of X"."""
+    t = _TAGS.sub("", stem.replace("_", " ")).strip(" -._")
+    m = re.match(r"^(.*), (The|A|An)(\b.*)?$", t)
+    if m:
+        t = f"{m.group(2)} {m.group(1)}{m.group(3) or ''}"
+    return re.sub(r"\s+", " ", t).strip() or stem
+
+
+def m3u_text(disc_paths: list[str]) -> str:
+    """A RetroArch playlist: one disc per line, in disc order."""
+    return "".join(p + "\n" for p in disc_paths)
+
+
+def group_discs(files: list[str]) -> tuple[dict[str, list[str]], list[str]]:
+    """Splits content files into multi-disc sets and single files. A set is two or more files in one
+    directory whose names differ only by their "(Disc N)" tag. Returns ({set stem: [paths in disc
+    order]}, [everything else])."""
+    sets: dict[tuple[str, str], list[tuple[int, str]]] = {}
+    singles: list[str] = []
+    for f in files:
+        p = Path(f)
+        n = disc_number(p.stem)
+        if n is None:
+            singles.append(f)
+        else:
+            sets.setdefault((str(p.parent), strip_disc(p.stem)), []).append((n, f))
+    out: dict[str, list[str]] = {}
+    for (parent, stem), discs in sets.items():
+        if len(discs) < 2:
+            singles.extend(f for _, f in discs)
+        else:
+            out[str(Path(parent) / stem)] = [f for _, f in sorted(discs)]
+    return out, singles
+
+
+# --------------------------------------------------------------------------------------------
+# The Final Fantasy shelf: titles, systems and years only. No artwork, nothing downloaded.
+# --------------------------------------------------------------------------------------------
+
+_ROMAN = {"i": "1", "ii": "2", "iii": "3", "iv": "4", "v": "5", "vi": "6", "vii": "7", "viii": "8",
+          "ix": "9", "x": "10", "xi": "11", "xii": "12"}
+
+
+def normalize(title: str) -> str:
+    """Lower case, punctuation to spaces, roman numerals to digits: "Final Fantasy X-2" -> "final fantasy 10 2"."""
+    words = re.sub(r"[^a-z0-9]+", " ", title.lower()).split()
+    return " ".join(_ROMAN.get(w, w) for w in words)
+
+
+@dataclass(frozen=True)
+class ShelfEntry:
+    key: str
+    title: str
+    year: int
+    platforms: str
+    patterns: tuple[str, ...]
+
+
+FF_SHELF: tuple[ShelfEntry, ...] = (
+    ShelfEntry("ff1", "Final Fantasy", 1987, "NES · WonderSwan · PS1 · GBA · PSP",
+               (r"^final fantasy( 1)?$", r"^final fantasy 1 (and )?2\b", r"^final fantasy origins", r"^final fantasy anniversary")),
+    ShelfEntry("ff2", "Final Fantasy II", 1988, "Famicom · WonderSwan · PS1 · GBA · PSP",
+               (r"^final fantasy 2$", r"^final fantasy 1 (and )?2\b", r"^final fantasy origins", r"^final fantasy 2 anniversary")),
+    ShelfEntry("ff3", "Final Fantasy III", 1990, "Famicom · DS · PSP", (r"^final fantasy 3$",)),
+    ShelfEntry("ff4", "Final Fantasy IV", 1991, "SNES · PS1 · GBA · DS · PSP",
+               (r"^final fantasy 4\b", r"^final fantasy chronicles")),
+    ShelfEntry("ff5", "Final Fantasy V", 1992, "Super Famicom · PS1 · GBA",
+               (r"^final fantasy 5\b", r"^final fantasy anthology")),
+    ShelfEntry("ff6", "Final Fantasy VI", 1994, "SNES · PS1 · GBA",
+               (r"^final fantasy 6\b", r"^final fantasy anthology")),
+    ShelfEntry("ff7", "Final Fantasy VII", 1997, "PS1", (r"^final fantasy 7$", r"^final fantasy 7 international")),
+    ShelfEntry("ff8", "Final Fantasy VIII", 1999, "PS1", (r"^final fantasy 8$",)),
+    ShelfEntry("ff9", "Final Fantasy IX", 2000, "PS1", (r"^final fantasy 9$",)),
+    ShelfEntry("fft", "Final Fantasy Tactics", 1997, "PS1 · PSP",
+               (r"^final fantasy tactics$", r"^final fantasy tactics the war of the lions")),
+    ShelfEntry("ff10", "Final Fantasy X", 2001, "PS2", (r"^final fantasy 10$", r"^final fantasy 10 international")),
+    ShelfEntry("ff10-2", "Final Fantasy X-2", 2003, "PS2", (r"^final fantasy 10 2\b",)),
+    ShelfEntry("ff12", "Final Fantasy XII", 2006, "PS2", (r"^final fantasy 12$", r"^final fantasy 12 international")),
+    ShelfEntry("ffa", "Final Fantasy Adventure", 1991, "Game Boy", (r"^final fantasy adventure",)),
+    ShelfEntry("ffl1", "The Final Fantasy Legend", 1989, "Game Boy", (r"^(the )?final fantasy legend$",)),
+    ShelfEntry("ffl2", "Final Fantasy Legend II", 1990, "Game Boy", (r"^final fantasy legend 2$",)),
+    ShelfEntry("ffl3", "Final Fantasy Legend III", 1991, "Game Boy", (r"^final fantasy legend 3$",)),
+    ShelfEntry("ffmq", "Final Fantasy Mystic Quest", 1992, "SNES", (r"^final fantasy mystic quest", r"^mystic quest legend")),
+    ShelfEntry("ffta", "Final Fantasy Tactics Advance", 2003, "GBA", (r"^final fantasy tactics advance",)),
+    ShelfEntry("ffta2", "Final Fantasy Tactics A2", 2007, "DS", (r"^final fantasy tactics a2",)),
+    ShelfEntry("ff12rw", "Final Fantasy XII: Revenant Wings", 2007, "DS", (r"^final fantasy 12 revenant wings",)),
+    ShelfEntry("ffcc-rof", "Crystal Chronicles: Ring of Fates", 2007, "DS", (r"crystal chronicles ring of fates",)),
+    ShelfEntry("ffcc-eot", "Crystal Chronicles: Echoes of Time", 2009, "DS", (r"crystal chronicles echoes of time",)),
+    ShelfEntry("ff7cc", "Crisis Core: Final Fantasy VII", 2007, "PSP", (r"^crisis core",)),
+    ShelfEntry("dissidia", "Dissidia Final Fantasy", 2008, "PSP", (r"^dissidia( 012| duodecim)?( prologus)? final fantasy", r"^dissidia 012")),
+    ShelfEntry("type0", "Final Fantasy Type-0", 2011, "PSP", (r"^final fantasy type 0", r"^final fantasy reishiki")),
+)
+
+
+def ff_keys(title: str, system: str) -> list[str]:
+    """Which shelf entries a game lights up. A compilation lights up each game in it. On the SNES the
+    American "Final Fantasy II" and "III" are IV and VI: the Super Famicom never had a II or a III."""
+    n = normalize(title)
+    if system == "snes":
+        n = re.sub(r"^final fantasy 2$", "final fantasy 4", n)
+        n = re.sub(r"^final fantasy 3$", "final fantasy 6", n)
+    return [e.key for e in FF_SHELF if any(re.search(p, n) for p in e.patterns)]
+
+
+# --------------------------------------------------------------------------------------------
+# Fuzzy matching
+# --------------------------------------------------------------------------------------------
+
+def fuzzy_score(text: str, query: str) -> float | None:
+    """None when the query's characters do not appear in order. Roman numerals and digits match each
+    other ("ff7", "final fantasy vii"); word starts and runs score higher; a full match scores highest."""
+    t = normalize(text)
+    q = " ".join("ff" + _ROMAN.get(m.group(1), m.group(1)) + m.group(2) if (m := re.fullmatch(r"ff([ivx]+)(\d*)", w)) else w
+                 for w in normalize(query).split())
+    if not q:
+        return 0.0
+    initials = "".join(w[0] if not w.isdigit() else w for w in t.split())
+    if q.replace(" ", "") == initials:
+        return 900.0
+    if t == q:
+        return 1000.0
+    if q in t:
+        return 800.0 - t.index(q) - (len(t) - len(q)) * 0.5
+    qc = q.replace(" ", "")
+    if initials.startswith(qc):
+        return 700.0 - len(initials)
+    score, pos, run = 0.0, 0, 0
+    for ch in qc:
+        i = t.find(ch, pos)
+        if i < 0:
+            return None
+        start = i == 0 or t[i - 1] == " "
+        run = run + 1 if i == pos and pos > 0 else 0
+        score += 10 + (15 if start else 0) + run * 5
+        pos = i + 1
+    return score - len(t) * 0.25
+
+
+def fuzzy_pick(games: list[dict], query: str) -> dict | None:
+    best, best_score = None, None
+    for g in games:
+        s = fuzzy_score(g["title"], query)
+        if s is None:
+            continue
+        s += 5 if g.get("ff") else 0
+        if best_score is None or s > best_score:
+            best, best_score = g, s
+    return best
+
+
+# --------------------------------------------------------------------------------------------
+# Paths and environment
+# --------------------------------------------------------------------------------------------
+
+@dataclass
+class Env:
+    """Everything the tool learns from the machine, so tests can point it at a temp directory."""
+    home: Path
+    config: Path = field(default=None)  # type: ignore[assignment]
+    data: Path = field(default=None)    # type: ignore[assignment]
+    which: object = shutil.which
+    flatpak_roots: tuple[Path, ...] = ()
+
+    def __post_init__(self):
+        self.home = Path(self.home)
+        if self.config is None:
+            self.config = Path(os.environ.get("XDG_CONFIG_HOME") or self.home / ".config") / "xiv-arcade"
+        if self.data is None:
+            self.data = Path(os.environ.get("XDG_DATA_HOME") or self.home / ".local/share") / "xiv-arcade"
+        if not self.flatpak_roots:
+            self.flatpak_roots = (Path("/var/lib/flatpak/app"), self.home / ".local/share/flatpak/app")
+
+    @property
+    def settings_path(self) -> Path:
+        return self.config / "config.json"
+
+    @property
+    def db_path(self) -> Path:
+        return self.config / "arcade.db"
+
+    @property
+    def state_path(self) -> Path:
+        return self.config / "state.json"
+
+    @property
+    def sync_root(self) -> Path:
+        """The one tree Syncthing replicates: saves/<system>/ and states/<system>/."""
+        return self.data / "sync"
+
+    @property
+    def backups(self) -> Path:
+        return self.data / "backups"
+
+    def settings(self) -> dict:
+        try:
+            return json.loads(self.settings_path.read_text())
+        except (OSError, ValueError):
+            return {}
+
+    def games_root(self) -> Path:
+        return Path(self.settings().get("games") or self.home / "Games/Arcade")
+
+    def extra_roots(self) -> list[Path]:
+        return [Path(p) for p in self.settings().get("more_folders", [])]
+
+
+def atomic_write(path: Path, text: str) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_name(path.name + ".tmp")
+    tmp.write_text(text)
+    os.replace(tmp, path)
+
+
+# --------------------------------------------------------------------------------------------
+# Emulator detection and the launch command
+# --------------------------------------------------------------------------------------------
+
+@dataclass
+class Frontend:
+    kind: str            # "flatpak" | "native" | "none"
+    core_dirs: list[Path]
+
+    def argv_prefix(self) -> list[str]:
+        return ["flatpak", "run", RETROARCH_FLATPAK] if self.kind == "flatpak" else ["retroarch"]
+
+
+def find_frontend(env: Env) -> Frontend:
+    if any((r / RETROARCH_FLATPAK).is_dir() for r in env.flatpak_roots):
+        return Frontend("flatpak", [env.home / ".var/app" / RETROARCH_FLATPAK / "config/retroarch/cores"])
+    if env.which("retroarch"):
+        return Frontend("native", [env.home / ".config/retroarch/cores", Path("/usr/lib64/libretro"),
+                                   Path("/usr/lib/libretro"), Path("/usr/lib/x86_64-linux-gnu/libretro")])
+    return Frontend("none", [])
+
+
+def find_core(front: Frontend, system: System) -> Path | None:
+    for core in system.cores:
+        for d in front.core_dirs:
+            p = d / f"{core}_libretro.so"
+            if p.is_file():
+                return p
+    return None
+
+
+def install_line(env: Env) -> str:
+    """One line that installs RetroArch and lets its sandbox reach the games and the saves."""
+    return (f"flatpak install -y flathub {RETROARCH_FLATPAK} && flatpak override --user "
+            f"--filesystem={shlex.quote(str(env.games_root()))} --filesystem={shlex.quote(str(env.data))} "
+            f"--filesystem={shlex.quote(str(env.config))}:ro {RETROARCH_FLATPAK}")
+
+
+def core_hint(system: System) -> str:
+    return (f"{system.name}: in RetroArch open Main Menu > Online Updater > Core Downloader and get "
+            f"\"{system.cores[0]}\" (also accepted: {', '.join(system.cores[1:]) or 'none'}).")
+
+
+def system_cfg(env: Env, system: System) -> Path:
+    return env.config / "cfg" / f"{system.id}.cfg"
+
+
+def system_cfg_text(env: Env, system: System) -> str:
+    """RetroArch overrides appended at launch: saves and states go under the synced tree, by system, the
+    same on every machine whatever core runs them. The player's own retroarch.cfg is never edited."""
+    saves = env.sync_root / "saves" / system.id
+    states = env.sync_root / "states" / system.id
+    return "".join(f'{k} = "{v}"\n' for k, v in (
+        ("savefile_directory", saves), ("savestate_directory", states),
+        ("sort_savefiles_enable", "false"), ("sort_savestates_enable", "false"),
+        ("sort_savefiles_by_content_enable", "false"), ("sort_savestates_by_content_enable", "false"),
+        ("savefiles_in_content_dir", "false"), ("savestates_in_content_dir", "false"),
+        ("autosave_interval", "10"), ("pause_nonactive", "true"),
+    ))
+
+
+def launch_argv(env: Env, front: Frontend, system: System, core: Path, content: str) -> list[str]:
+    return [*front.argv_prefix(), "-L", str(core), "--appendconfig", str(system_cfg(env, system)), content]
+
+
+# --------------------------------------------------------------------------------------------
+# The SQLite index: library, play history, sync state
+# --------------------------------------------------------------------------------------------
+
+SCHEMA = """
+CREATE TABLE IF NOT EXISTS games (
+  id TEXT PRIMARY KEY, title TEXT NOT NULL, sort_title TEXT, year INTEGER, system TEXT NOT NULL, path TEXT NOT NULL,
+  discs TEXT NOT NULL DEFAULT '[]', ff TEXT NOT NULL DEFAULT '[]', boxart TEXT,
+  present INTEGER NOT NULL DEFAULT 1, first_seen REAL NOT NULL, last_seen REAL NOT NULL);
+CREATE TABLE IF NOT EXISTS plays (
+  id INTEGER PRIMARY KEY, game_id TEXT NOT NULL, core TEXT, started REAL NOT NULL, ended REAL, exit_code INTEGER);
+CREATE INDEX IF NOT EXISTS plays_game ON plays(game_id, started);
+CREATE TABLE IF NOT EXISTS sync_state (key TEXT PRIMARY KEY, value TEXT NOT NULL, at REAL NOT NULL);
+CREATE TABLE IF NOT EXISTS conflicts (
+  id INTEGER PRIMARY KEY, live TEXT NOT NULL, kept_as TEXT NOT NULL, live_mtime REAL, kept_mtime REAL, at REAL NOT NULL);
+"""
+
+
+def game_id(system: str, title: str) -> str:
+    """Stable across machines: the same title on the same system is the same game wherever the file lives."""
+    return hashlib.sha1(f"{system}/{normalize(title)}".encode()).hexdigest()[:12]
+
+
+class Index:
+    def __init__(self, path: Path | str):
+        if path != ":memory:":
+            Path(path).parent.mkdir(parents=True, exist_ok=True)
+        self.db = sqlite3.connect(str(path))
+        self.db.row_factory = sqlite3.Row
+        self.db.executescript(SCHEMA)
+        self.db.execute(f"PRAGMA user_version = {VERSION}")
+
+    def close(self):
+        self.db.close()
+
+    def replace_library(self, games: list[dict], now: float | None = None) -> None:
+        """Upserts what the scan found and marks the rest absent. History survives a file going away
+        and coming back, because the id is the title, not the path."""
+        now = time.time() if now is None else now
+        with self.db:
+            self.db.execute("UPDATE games SET present = 0")
+            for g in games:
+                self.db.execute(
+                    "INSERT INTO games (id, title, sort_title, year, system, path, discs, ff, boxart, present, first_seen, last_seen) "
+                    "VALUES (?,?,?,?,?,?,?,?,?,1,?,?) ON CONFLICT(id) DO UPDATE SET title=excluded.title, path=excluded.path, "
+                    "sort_title=excluded.sort_title, year=excluded.year, "
+                    "discs=excluded.discs, ff=excluded.ff, boxart=excluded.boxart, present=1, last_seen=excluded.last_seen",
+                    (g["id"], g["title"], g.get("sort_title") or g["title"], g.get("year"), g["system"], g["path"],
+                     json.dumps(g.get("discs", [])),
+                     json.dumps(g.get("ff", [])), g.get("boxart"), now, now))
+
+    def games(self) -> list[dict]:
+        rows = self.db.execute(
+            "SELECT g.*, (SELECT MAX(started) FROM plays p WHERE p.game_id = g.id) AS last_played "
+            "FROM games g WHERE present = 1 ORDER BY COALESCE(sort_title, title) COLLATE NOCASE").fetchall()
+        out = []
+        for r in rows:
+            d = dict(r)
+            d["discs"], d["ff"] = json.loads(d["discs"]), json.loads(d["ff"])
+            out.append(d)
+        return out
+
+    def start_play(self, gid: str, core: str, now: float | None = None) -> int:
+        with self.db:
+            return self.db.execute("INSERT INTO plays (game_id, core, started) VALUES (?,?,?)",
+                                   (gid, core, time.time() if now is None else now)).lastrowid
+
+    def end_play(self, play: int, code: int, now: float | None = None) -> None:
+        with self.db:
+            self.db.execute("UPDATE plays SET ended = ?, exit_code = ? WHERE id = ?",
+                            (time.time() if now is None else now, code, play))
+
+    def last_played(self) -> dict | None:
+        r = self.db.execute("SELECT g.id FROM plays p JOIN games g ON g.id = p.game_id AND g.present = 1 "
+                            "ORDER BY p.started DESC LIMIT 1").fetchone()
+        return next((g for g in self.games() if g["id"] == r["id"]), None) if r else None
+
+    def set_state(self, key: str, value, now: float | None = None) -> None:
+        with self.db:
+            self.db.execute("INSERT INTO sync_state (key, value, at) VALUES (?,?,?) ON CONFLICT(key) DO UPDATE SET "
+                            "value=excluded.value, at=excluded.at", (key, json.dumps(value), time.time() if now is None else now))
+
+    def get_state(self, key: str, default=None):
+        r = self.db.execute("SELECT value FROM sync_state WHERE key = ?", (key,)).fetchone()
+        return json.loads(r["value"]) if r else default
+
+    def add_conflict(self, c: "Resolved") -> None:
+        with self.db:
+            self.db.execute("INSERT INTO conflicts (live, kept_as, live_mtime, kept_mtime, at) VALUES (?,?,?,?,?)",
+                            (c.live, c.kept_as, c.live_mtime, c.kept_mtime, time.time()))
+
+    def recent_conflicts(self, limit: int = 5) -> list[dict]:
+        return [dict(r) for r in self.db.execute("SELECT * FROM conflicts ORDER BY at DESC LIMIT ?", (limit,))]
+
+
+# --------------------------------------------------------------------------------------------
+# LaunchBox: a library copied in as it is (Games/, Images/, Data/Platforms/*.xml)
+# --------------------------------------------------------------------------------------------
+
+LB_IMAGE_FOLDERS = ("Box - Front", "Box - Front - Reconstructed", "Fanart - Box - Front", "Box - 3D", "Clear Logo",
+                    "Screenshot - Game Title", "Screenshot - Gameplay")
+_LB_SKIP = {"images", "data", "metadata", "core", "thirdparty", "emulators", "manuals", "music", "videos", "themes",
+            "plugins", "backups", "updates", "logs", "boxart"}
+
+
+def platform_system(name: str) -> System | None:
+    """A LaunchBox platform name ("Sony Playstation 2") or one of our folder names, case-insensitively."""
+    return _FOLDERS.get(_fold(name))
+
+
+def find_launchbox_roots(root: Path, depth: int = 2) -> list[Path]:
+    """Directories at or just below `root` that look like LaunchBox: Data/Platforms, or Games beside Images."""
+    out, level = [], [root]
+    for _ in range(depth + 1):
+        nxt = []
+        for d in level:
+            if (d / "Data" / "Platforms").is_dir() or ((d / "Games").is_dir() and (d / "Images").is_dir()):
+                out.append(d)
+                continue
+            try:
+                nxt.extend(c for c in sorted(d.iterdir()) if c.is_dir() and not c.name.startswith("."))
+            except OSError:
+                pass
+        level = nxt
+    return out
+
+
+def resolve_ci(base: Path, parts: list[str]) -> Path | None:
+    """Follows `parts` below `base` ignoring case, as Windows would have."""
+    cur = base
+    for part in parts:
+        if part in ("", "."):
+            continue
+        if part == "..":
+            cur = cur.parent
+            continue
+        nxt = cur / part
+        if not nxt.exists():
+            try:
+                nxt = next((c for c in cur.iterdir() if c.name.lower() == part.lower()), None)
+            except OSError:
+                nxt = None
+            if nxt is None:
+                return None
+        cur = nxt
+    return cur
+
+
+def normalize_lb_path(lbroot: Path, app_path: str) -> Path | None:
+    """An ApplicationPath as LaunchBox wrote it on Windows, found again where the library was copied to.
+    Relative paths ("Games\\Sony Playstation\\x.chd", "..\\Roms\\x.chd") resolve against the LaunchBox
+    folder. An absolute one ("D:\\LaunchBox\\Games\\...") loses its drive and is matched by its longest
+    tail that exists below the copied folder."""
+    raw = app_path.strip().replace("\\", "/")
+    drive = re.match(r"^[A-Za-z]:", raw)
+    parts = [p for p in (raw[2:] if drive else raw).split("/") if p]
+    if not parts:
+        return None
+    if not drive and not raw.startswith("/"):
+        hit = resolve_ci(lbroot, parts)
+        if hit is not None and hit.is_file():
+            return hit
+    for i in range(len(parts)):
+        hit = resolve_ci(lbroot, parts[i:])
+        if hit is not None and hit.is_file():
+            return hit
+    return None
+
+
+def parse_launchbox_platform(xml_path: Path, lbroot: Path) -> list[dict]:
+    """The games in one Data/Platforms/<Platform>.xml: title, sort title, year, and every disc in order
+    (the game's own ApplicationPath, then its AdditionalApplications that carry a Disc number)."""
+    try:
+        tree = ET.parse(xml_path).getroot()
+    except (OSError, ET.ParseError):
+        return []
+    extras: dict[str, list[tuple[int, str]]] = {}
+    for a in tree.iter("AdditionalApplication"):
+        disc, path = (a.findtext("Disc") or "").strip(), a.findtext("ApplicationPath") or ""
+        if disc.isdigit() and path:
+            extras.setdefault(a.findtext("GameID") or "", []).append((int(disc), path))
+    games = []
+    for g in tree.iter("Game"):
+        title, app = (g.findtext("Title") or "").strip(), g.findtext("ApplicationPath") or ""
+        if not title or not app:
+            continue
+        platform = (g.findtext("Platform") or xml_path.stem).strip()
+        gid = g.findtext("ID") or ""
+        discs = sorted({(1, app), *extras.get(gid, [])}) if extras.get(gid) else []
+        seen, paths = set(), []
+        for _, raw in discs:
+            p = normalize_lb_path(lbroot, raw)
+            if p is not None and str(p) not in seen:
+                seen.add(str(p))
+                paths.append(str(p))
+        main = normalize_lb_path(lbroot, app)
+        year = (g.findtext("ReleaseDate") or "")[:4]
+        games.append({"lb_id": gid, "title": title, "sort_title": (g.findtext("SortTitle") or "").strip() or title,
+                      "year": int(year) if year.isdigit() else None, "platform": platform,
+                      "path": str(main) if main else None, "discs": paths if len(paths) > 1 else []})
+    return games
+
+
+class LbImages:
+    """Artwork the player already has under Images/<Platform>/<kind>/ (region subfolders included).
+    LaunchBox replaces characters Windows forbids with "_" and appends "-01", "-02"; comparing names with
+    everything but letters and digits removed absorbs both."""
+
+    def __init__(self, lbroot: Path):
+        self.root = lbroot / "Images"
+        self.cache: dict[str, dict[str, str]] = {}
+
+    def _platform(self, platform: str) -> dict[str, str]:
+        if platform not in self.cache:
+            found: dict[str, str] = {}
+            pdir = resolve_ci(self.root, [platform]) if self.root.is_dir() else None
+            for kind in LB_IMAGE_FOLDERS if pdir else ():
+                kdir = resolve_ci(pdir, [kind])
+                if kdir is None:
+                    continue
+                best: dict[str, tuple[int, str]] = {}
+                for dirpath, _, files in os.walk(kdir):
+                    for f in files:
+                        if f.lower().endswith(IMAGE_EXTS):
+                            m = re.match(r"^(.*?)(?:-(\d{1,2}))?$", Path(f).stem)
+                            cand = (int(m.group(2) or 0), os.path.join(dirpath, f))
+                            key = _fold(m.group(1))
+                            best[key] = min(best.get(key, cand), cand)
+                for key, (_, path) in best.items():
+                    found.setdefault(key, path)
+            self.cache[platform] = found
+        return self.cache[platform]
+
+    def find(self, platform: str, *names: str) -> str | None:
+        images = self._platform(platform)
+        return next((images[_fold(n)] for n in names if n and _fold(n) in images), None)
+
+
+# --------------------------------------------------------------------------------------------
+# Scanning
+# --------------------------------------------------------------------------------------------
+
+def find_boxart(content: Path, title: str) -> str | None:
+    """Artwork only from files the player put there: next to the game, or in a boxart/ folder beside it."""
+    for d in (content.parent, content.parent / "boxart"):
+        for stem in (content.stem, strip_disc(content.stem), title):
+            for ext in IMAGE_EXTS:
+                p = d / (stem + ext)
+                if p.is_file():
+                    return str(p)
+    return None
+
+
+def _walk_games(root: Path) -> list[str]:
+    files = []
+    for dirpath, dirnames, filenames in os.walk(root):
+        dirnames[:] = sorted(d for d in dirnames if not d.startswith(".") and d.lower() not in _LB_SKIP)
+        files.extend(os.path.join(dirpath, f) for f in sorted(filenames) if not f.startswith("."))
+    return files
+
+
+def scan(env: Env) -> list[dict]:
+    """Every game under the games folder and any extra folders: our own <console>/ layout and LaunchBox
+    trees together. A game is its console plus its title, so the same game in both places is one entry."""
+    found: dict[str, dict] = {}
+    for root in [env.games_root(), *env.extra_roots()]:
+        if not root.is_dir():
+            continue
+        lbroots = find_launchbox_roots(root)
+        meta: dict[str, dict] = {}           # content path -> LaunchBox record
+        claimed: set[str] = set()            # discs that belong to a LaunchBox multi-disc game
+        for lb in lbroots:
+            images = LbImages(lb)
+            pdir = lb / "Data" / "Platforms"
+            for xml_path in sorted(pdir.glob("*.xml")) if pdir.is_dir() else ():
+                for rec in parse_launchbox_platform(xml_path, lb):
+                    rec["images"] = images
+                    if rec["path"]:
+                        meta[rec["path"]] = rec
+                    claimed.update(rec["discs"][1:])
+        files = _walk_games(root)
+        cues = {(os.path.dirname(f), Path(f).stem.lower()) for f in files if f.lower().endswith((".cue", ".ccd"))}
+        listed: set[str] = set()
+        for f in files:
+            if f.lower().endswith(".m3u"):
+                try:
+                    listed.update(str((Path(f).parent / line.strip()).resolve()) for line in Path(f).read_text().splitlines()
+                                  if line.strip() and not line.startswith("#"))
+                except OSError:
+                    pass
+        by_system: dict[str, list[str]] = {}
+        for f in files:
+            p = Path(f)
+            rec = meta.get(f)
+            s = (platform_system(rec["platform"]) if rec else None) or detect_system(f, str(root))
+            if s is None or p.suffix.lower() not in s.exts:
+                continue
+            # a .bin/.img beside its .cue/.ccd is a track, not a game; a disc named in an .m3u belongs to that set
+            if p.suffix.lower() in (".bin", ".img") and any(c[0] == str(p.parent) and p.stem.lower().startswith(c[1]) for c in cues):
+                continue
+            if str(p.resolve()) in listed or f in claimed:
+                continue
+            by_system.setdefault(s.id, []).append(f)
+        lb_images = {str(lb): LbImages(lb) for lb in lbroots}
+        for sid, paths in by_system.items():
+            lb_sets = {f: meta[f]["discs"] for f in paths if f in meta and meta[f]["discs"]}
+            rest = [f for f in paths if f not in lb_sets]
+            sets, singles = group_discs(rest)
+            for first, discs in lb_sets.items():
+                _add(env, found, sid, meta[first]["title"], discs, meta[first], lb_images)
+            for stem, discs in sets.items():
+                rec = next((meta[d] for d in discs if d in meta), None)
+                _add(env, found, sid, rec["title"] if rec else clean_title(Path(stem).name), discs, rec, lb_images)
+            for f in singles:
+                rec = meta.get(f)
+                _add(env, found, sid, rec["title"] if rec else clean_title(Path(f).stem), [f], rec, lb_images)
+    return sorted(found.values(), key=lambda g: (g["sort_title"] or g["title"]).lower())
+
+
+def _add(env: Env, found: dict, sid: str, title: str, files: list[str], rec: dict | None, lb_images: dict) -> None:
+    gid = game_id(sid, title)
+    if gid in found:
+        return
+    path, discs = files[0], []
+    if len(files) > 1:
+        playlist = env.config / "playlists" / sid / (re.sub(r'[/\\:*?"<>|]', "_", title) + ".m3u")
+        text = m3u_text(files)
+        if not playlist.is_file() or playlist.read_text() != text:
+            atomic_write(playlist, text)
+        path, discs = str(playlist), files
+    first = Path(files[0])
+    art = find_boxart(first, title)
+    if art is None:
+        for lbroot, images in lb_images.items():
+            if files[0].startswith(lbroot + os.sep):
+                platform = rec["platform"] if rec else next((p for p in first.relative_to(lbroot).parts if platform_system(p)), "")
+                art = images.find(platform, rec["lb_id"] if rec else "", title, first.stem, strip_disc(first.stem))
+                break
+    found[gid] = {"id": gid, "title": title, "sort_title": rec["sort_title"] if rec else title,
+                  "year": rec["year"] if rec else None, "system": sid, "path": path, "discs": discs,
+                  "ff": ff_keys(title, sid), "boxart": art}
+
+
+def save_stem(filename: str) -> str:
+    """The content name a save belongs to: "Game.srm", "Game.state3", "Game.state.auto", "Game.state1.png" -> "Game"."""
+    m = re.match(r"^(.*?)(\.state\d*(\.auto)?(\.png)?|\.[^.]+)$", filename, re.I)
+    return m.group(1) if m else filename
+
+
+def import_saves(env: Env, index: "Index", source: Path) -> dict:
+    """Copies saves and states from another RetroArch install (a LaunchBox\\Emulators\\RetroArch folder, or
+    its saves/ or states/ folder) into the synced tree. A save whose name matches a game in the library
+    goes to that game's console; otherwise the per-core subfolder it sat in decides. Never overwrites a
+    newer save: when the one already here is newer or the same age, it stays."""
+    stems = {Path(g["path"]).stem.lower(): g["system"] for g in index.games()}
+    for g in index.games():
+        stems.update({strip_disc(Path(d).stem).lower(): g["system"] for d in g["discs"]})
+    report = {"imported": [], "kept_newer": [], "unknown": []}
+    kinds = [(k, d) for k in ("saves", "states") for d in [resolve_ci(source, [k])] if d is not None and d.is_dir()]
+    if not kinds:
+        kinds = [("states" if source.name.lower() == "states" else "saves", source)]
+    for kind, base in kinds:
+        for dirpath, _, files in os.walk(base):
+            rel_dir = Path(dirpath).relative_to(base)
+            for f in sorted(files):
+                src = Path(dirpath) / f
+                stem = save_stem(f)
+                system = stems.get(stem.lower()) or stems.get(strip_disc(stem).lower())
+                rel = Path(f)
+                if system is None and rel_dir.parts:
+                    core = CORE_FOLDERS.get(_fold(rel_dir.parts[0]))
+                    system, rel = core, Path(*rel_dir.parts[1:]) / f
+                if system is None:
+                    report["unknown"].append(str(src))
+                    continue
+                dst = env.sync_root / kind / system / rel
+                report["imported" if copy_if_newer(src, dst) else "kept_newer"].append(str(dst))
+    return report
+
+
+CORE_FOLDERS = {_fold(k): v for k, v in {
+    "Mesen": "nes", "Nestopia": "nes", "Nestopia UE": "nes", "FCEUmm": "nes", "Snes9x": "snes", "bsnes": "snes",
+    "Gambatte": "gb", "SameBoy": "gb", "mGBA": "gba", "VBA Next": "gba", "VBA-M": "gba",
+    "melonDS": "nds", "melonDS DS": "nds", "DeSmuME": "nds", "Beetle WonderSwan": "wswan", "Beetle Cygne": "wswan",
+    "SwanStation": "psx", "DuckStation": "psx", "Beetle PSX": "psx", "Beetle PSX HW": "psx", "PCSX-ReARMed": "psx",
+    "PCSX ReARMed": "psx", "LRPS2": "ps2", "PCSX2": "ps2", "Play!": "ps2", "PPSSPP": "psp",
+    "Genesis Plus GX": "genesis", "PicoDrive": "genesis", "Mupen64Plus-Next": "n64", "ParaLLEl N64": "n64",
+}.items()}
+
+
+# --------------------------------------------------------------------------------------------
+# Saves: backups, conflicts, and the sync state machine
+# --------------------------------------------------------------------------------------------
+
+_CONFLICT = re.compile(r"^(?P<stem>.*)\.sync-conflict-(?P<date>\d{8})-(?P<time>\d{6})-(?P<dev>[A-Z0-9]{7})(?P<ext>\..*)?$")
+
+
+@dataclass
+class Resolved:
+    live: str
+    kept_as: str
+    live_mtime: float
+    kept_mtime: float
+    swapped: bool
+
+
+def resolve_conflicts(root: Path) -> list[Resolved]:
+    """Syncthing leaves "name.sync-conflict-DATE-TIME-DEVICE.ext" beside the file it chose. Neither copy
+    is ever deleted: the NEWER of the two (by modification time) becomes the live save, and the other is
+    kept beside it under a plain name that says where and when it came from."""
+    out = []
+    for dirpath, dirnames, filenames in os.walk(root):
+        dirnames[:] = [d for d in dirnames if d != ".stversions"]
+        for name in sorted(filenames):
+            m = _CONFLICT.match(name)
+            if not m:
+                continue
+            ext = m.group("ext") or ""
+            copy = Path(dirpath) / name
+            live = Path(dirpath) / (m.group("stem") + ext)
+            d, t = m.group("date"), m.group("time")
+            label = f"{d[:4]}-{d[4:6]}-{d[6:]} {t[:2]}.{t[2:4]}"
+            copy_m = copy.stat().st_mtime
+            if not live.exists():
+                os.replace(copy, live)
+                out.append(Resolved(str(live), str(live), copy_m, copy_m, True))
+                continue
+            live_m = live.stat().st_mtime
+            swapped = copy_m > live_m
+            kept = _free(Path(dirpath) / f"{m.group('stem')} (older save, device {m.group('dev')}, {label}){ext}")
+            if swapped:
+                os.replace(live, kept)
+                os.replace(copy, live)
+            else:
+                os.replace(copy, kept)
+            out.append(Resolved(str(live), str(kept), max(live_m, copy_m), min(live_m, copy_m), swapped))
+    return out
+
+
+def _free(p: Path) -> Path:
+    n, q = 2, p
+    while q.exists():
+        q = p.with_name(f"{p.stem} #{n}{p.suffix}")
+        n += 1
+    return q
+
+
+def save_files(env: Env, game: dict) -> list[Path]:
+    """Every save and state RetroArch wrote for this game: it names them after the content file."""
+    stem = Path(game["path"]).stem
+    out = []
+    for kind in ("saves", "states"):
+        d = env.sync_root / kind / game["system"]
+        if d.is_dir():
+            out.extend(p for p in sorted(d.iterdir()) if p.is_file() and (p.stem == stem or p.name.startswith(stem + ".")))
+    return out
+
+
+def backup_saves(env: Env, game: dict, keep: int = 10, now: float | None = None) -> Path | None:
+    """A dated local copy of the game's saves before every launch, outside the synced tree."""
+    files = save_files(env, game)
+    if not files:
+        return None
+    stamp = time.strftime("%Y%m%d-%H%M%S", time.localtime(now))
+    dest = _free(env.backups / game["id"] / stamp)
+    dest.mkdir(parents=True)
+    for f in files:
+        shutil.copy2(f, dest / f.name)
+    old = sorted(p for p in dest.parent.iterdir() if p.is_dir())[:-keep]
+    for p in old:
+        shutil.rmtree(p, ignore_errors=True)
+    return dest
+
+
+def copy_if_newer(src: Path, dst: Path) -> bool:
+    """Never lets an older save replace a newer one. When dst is newer it stays, and src is left alone."""
+    if dst.exists() and dst.stat().st_mtime >= src.stat().st_mtime:
+        return False
+    dst.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copy2(src, dst)
+    return True
+
+
+@dataclass
+class SyncSnapshot:
+    """What Syncthing reports, reduced to what the decision needs."""
+    running: bool = False
+    configured: bool = False
+    paused: bool = False
+    state: str = ""             # idle, scanning, syncing, sync-preparing, sync-waiting, scan-waiting, error
+    need_bytes: int = 0         # data this machine still has to pull
+    errors: int = 0
+    peers: list[dict] = field(default_factory=list)   # {"id", "name", "connected", "completion"}
+    conflicts: int = 0
+    files: int = 0
+
+
+@dataclass
+class Verdict:
+    code: str      # off | unconfigured | paused | error | conflict | pulling | pushing | peer-offline | no-peers | in-sync
+    label: str
+    detail: str
+    can_launch: bool
+
+
+_BUSY = {"syncing", "sync-preparing", "sync-waiting", "scanning", "scan-waiting", "cleaning", "clean-waiting"}
+
+
+def decide(s: SyncSnapshot) -> Verdict:
+    """The sync state machine. The one state that refuses a launch is "pulling": a save may be half
+    written. Everything else lets the player play and says plainly what that means."""
+    if not s.running:
+        return Verdict("off", "Sync is off", "Syncthing is not running; saves stay on this machine until it is.", True)
+    if not s.configured:
+        return Verdict("unconfigured", "Sync not set up", "Syncthing runs, but the Arcade saves folder is not added yet.", True)
+    if s.conflicts:
+        return Verdict("conflict", "Conflict: both saves kept",
+                       f"{s.conflicts} save(s) changed on two machines. The newer one is live; the other is kept beside it.", True)
+    if s.state == "error" or s.errors:
+        return Verdict("error", "Sync error", "Syncthing reports an error for the Arcade saves folder; see its web page.", True)
+    if s.paused:
+        return Verdict("paused", "Sync paused", "The Arcade saves folder is paused in Syncthing.", True)
+    if s.need_bytes > 0 or s.state in _BUSY:
+        return Verdict("pulling", "Syncing…", "Newer saves are still arriving. Launching waits until they are complete.", False)
+    if not s.peers:
+        return Verdict("no-peers", "Ready · no other device yet", "The folder is set up. Pair a second machine to start syncing.", True)
+    online = [p for p in s.peers if p.get("connected")]
+    if not online:
+        return Verdict("peer-offline", "Other device offline",
+                       "You can play. Saves go out when a device comes back; if it also played, both saves are kept.", True)
+    if any(p.get("completion", 100) < 100 for p in online):
+        return Verdict("pushing", "Sending saves…", "This machine has the newest saves and is sending them.", True)
+    if s.files == 0:
+        return Verdict("in-sync", "Ready · nothing to sync yet", "Saves will appear here after your first game.", True)
+    return Verdict("in-sync", "In sync", f"{len(online)} device(s) connected and up to date.", True)
+
+
+# --------------------------------------------------------------------------------------------
+# Syncthing: read its local REST API; never start it, never pair anything unasked
+# --------------------------------------------------------------------------------------------
+
+class Syncthing:
+    def __init__(self, env: Env, base: str = "http://127.0.0.1:8384"):
+        self.env, self.base, self.key = env, base, None
+        for p in (env.home / ".local/state/syncthing/config.xml", env.home / ".config/syncthing/config.xml",
+                  env.home / ".var/app/com.github.zocker_160.SyncThingy/config/syncthing/config.xml"):
+            try:
+                gui = ET.parse(p).getroot().find("gui")
+                self.key = gui.findtext("apikey")
+                addr = gui.findtext("address") or ""
+                if addr and not addr.startswith("/"):
+                    self.base = "http://" + addr.replace("0.0.0.0", "127.0.0.1")
+                break
+            except (OSError, ET.ParseError, AttributeError):
+                continue
+
+    def _call(self, path: str, method: str = "GET"):
+        req = urllib.request.Request(self.base + path, method=method, headers={"X-API-Key": self.key or ""})
+        with urllib.request.urlopen(req, timeout=4) as r:
+            body = r.read()
+        return json.loads(body) if body else {}
+
+    def snapshot(self) -> SyncSnapshot:
+        s = SyncSnapshot(conflicts=count_conflicts(self.env.sync_root), files=count_files(self.env.sync_root))
+        if not self.key:
+            return s
+        try:
+            me = self._call("/rest/system/status").get("myID", "")
+            s.running = True
+            folders = {f["id"]: f for f in self._call("/rest/config/folders")}
+            f = folders.get(FOLDER_ID)
+            if f is None:
+                return s
+            s.configured, s.paused = True, bool(f.get("paused"))
+            st = self._call(f"/rest/db/status?folder={FOLDER_ID}")
+            s.state, s.need_bytes = st.get("state", ""), int(st.get("needBytes", 0))
+            s.errors = int(st.get("errors", 0) or st.get("pullErrors", 0))
+            conns = self._call("/rest/system/connections").get("connections", {})
+            names = {d["deviceID"]: d.get("name", "") for d in self._call("/rest/config/devices")}
+            for d in f.get("devices", []):
+                did = d["deviceID"]
+                if did == me:
+                    continue
+                up = bool(conns.get(did, {}).get("connected"))
+                comp = 100
+                if up:
+                    comp = self._call(f"/rest/db/completion?folder={FOLDER_ID}&device={did}").get("completion", 100)
+                s.peers.append({"id": did[:7], "name": names.get(did, ""), "connected": up, "completion": comp})
+        except (OSError, ValueError, KeyError, urllib.error.URLError):
+            s.running = s.running and True
+        return s
+
+    def rescan(self) -> bool:
+        try:
+            self._call(f"/rest/db/scan?folder={FOLDER_ID}", "POST")
+            return True
+        except (OSError, urllib.error.URLError):
+            return False
+
+
+def count_conflicts(root: Path) -> int:
+    return sum(1 for _, _, fs in os.walk(root) for f in fs if _CONFLICT.match(f)) if root.is_dir() else 0
+
+
+def count_files(root: Path) -> int:
+    n = 0
+    for dirpath, dirnames, fs in os.walk(root):
+        dirnames[:] = [d for d in dirnames if d != ".stversions"]
+        n += sum(1 for f in fs if not f.startswith(".") and f != "README.txt")
+    return n
+
+
+def settle(sync, index: Index, root: Path, wait: float, sleep=time.sleep, clock=time.monotonic) -> tuple[Verdict, list[Resolved]]:
+    """Ask for a rescan, give Syncthing up to `wait` seconds to stop pulling, then resolve conflicts."""
+    sync.rescan()
+    deadline = clock() + wait
+    while True:
+        v = decide(sync.snapshot())
+        if v.code != "pulling" or clock() >= deadline:
+            break
+        sleep(0.5)
+    resolved = resolve_conflicts(root)
+    for r in resolved:
+        index.add_conflict(r)
+    if resolved:
+        sync.rescan()
+        v = decide(sync.snapshot())
+    index.set_state("verdict", v.code)
+    return v, resolved
+
+
+STIGNORE = """// Written by xiv-arcade. Temporary and editor files never travel; every save and state does.
+(?d).DS_Store
+(?d)Thumbs.db
+(?d)desktop.ini
+*.tmp
+*.temp
+*.part
+*.swp
+*~
+.~lock.*
+.fuse_hidden*
+"""
+
+
+def syncthing_folder_xml(env: Env) -> str:
+    return f"""<folder id="{FOLDER_ID}" label="Arcade saves" path="{env.sync_root}" type="sendreceive"
+        rescanIntervalS="300" fsWatcherEnabled="true" fsWatcherDelayS="2" ignorePerms="true">
+    <versioning type="staggered">
+        <param key="maxAge" val="31536000"></param>
+        <cleanupIntervalS>3600</cleanupIntervalS>
+    </versioning>
+    <maxConflicts>-1</maxConflicts>
+</folder>"""
+
+
+def syncthing_folder_commands(env: Env) -> list[str]:
+    f = f"syncthing cli config folders {FOLDER_ID}"
+    return [
+        f"syncthing cli config folders add --id {FOLDER_ID} --label 'Arcade saves' --path {shlex.quote(str(env.sync_root))}",
+        f"{f} versioning type set staggered",
+        f"{f} versioning params set maxAge 31536000",
+        f"{f} max-conflicts set -- -1",
+        f"{f} ignore-perms set true",
+    ]
+
+
+def pair_commands(device_id: str, name: str, address: str | None) -> list[str]:
+    add = f"syncthing cli config devices add --device-id {device_id} --name {shlex.quote(name)}"
+    if address:
+        add += f" --addresses {shlex.quote(address)}"
+    return [add, f"syncthing cli config folders {FOLDER_ID} devices add --device-id {device_id}"]
+
+
+def syncthing_install_line(env: Env) -> str:
+    if env.which("syncthing"):
+        return "systemctl --user enable --now syncthing.service"
+    if env.which("brew"):
+        return "brew install syncthing && brew services start syncthing"
+    return "install the 'syncthing' package from your distribution, then: systemctl --user enable --now syncthing.service"
+
+
+def pairing_steps(env: Env, v: Verdict) -> list[dict]:
+    """The least the player has to do, as (text, command) pairs. Nothing here is run for him."""
+    steps = []
+    if v.code == "off":
+        steps.append({"text": "Start Syncthing on this machine (and on the other one).", "command": syncthing_install_line(env)})
+    if v.code in ("off", "unconfigured"):
+        steps.append({"text": "Add the Arcade saves folder, with versioning on.", "command": "xiv-arcade sync-setup --apply"})
+    if v.code in ("off", "unconfigured", "no-peers"):
+        steps.append({"text": "On the other machine run the same two steps, then \"xiv-arcade pair\" there to print its device ID. "
+                              "Back here, pair it (repeat the other way round, or accept the prompt in Syncthing's web page).",
+                      "command": "xiv-arcade pair DEVICE-ID --name other-pc --apply"})
+    return steps
+
+
+# --------------------------------------------------------------------------------------------
+# Setup and the state file the plugin reads
+# --------------------------------------------------------------------------------------------
+
+def setup(env: Env, games: str | None = None, launchbox: str | None = None) -> None:
+    if games or launchbox:
+        s = env.settings()
+        if games:
+            s["games"] = str(Path(games).expanduser())
+        if launchbox:
+            # A LaunchBox folder that stays where it is (another drive, a mount). One copied INTO the games
+            # folder needs nothing: it is found by itself.
+            lb = str(Path(launchbox).expanduser())
+            s["more_folders"] = sorted({*s.get("more_folders", []), lb})
+        atomic_write(env.settings_path, json.dumps(s, indent=2) + "\n")
+    root = env.games_root()
+    root.mkdir(parents=True, exist_ok=True)
+    _readme(root / "README.txt",
+            "Arcade games folder\n===================\n\nDrop your own game files into the folder for their console. "
+            "They show up in /arcade by themselves.\nOptional artwork: an image with the same name as the game "
+            "(.png or .jpg), beside it or in a boxart/ folder.\n\n" + LEGAL + "\n")
+    for s in SYSTEMS:
+        d = root / s.folder
+        d.mkdir(exist_ok=True)
+        _readme(d / "README.txt",
+                f"{s.name}\n{'=' * len(s.name)}\n\nAccepted files: {' '.join(s.exts)}\n"
+                + ("Multi-disc games: name the files \"Game (Disc 1).chd\", \"Game (Disc 2).chd\"; they become one entry.\n"
+                   if s.id in ("psx", "ps2") else "")
+                + (s.note + "\n" if s.note else "") + f"Emulator core: {s.cores[0]} (RetroArch).\n\n" + LEGAL + "\n")
+        (env.sync_root / "saves" / s.id).mkdir(parents=True, exist_ok=True)
+        (env.sync_root / "states" / s.id).mkdir(parents=True, exist_ok=True)
+        atomic_write(system_cfg(env, s), system_cfg_text(env, s))
+    if not (env.sync_root / ".stignore").exists():
+        (env.sync_root / ".stignore").write_text(STIGNORE)
+    env.backups.mkdir(parents=True, exist_ok=True)
+    Index(env.db_path).close()
+
+
+def _readme(path: Path, text: str) -> None:
+    if not path.exists():
+        path.write_text(text)
+
+
+def build_state(env: Env, index: Index, sync, playing: dict | None = None, message: str = "") -> dict:
+    games = index.games()
+    front = find_frontend(env)
+    have = {g["system"] for g in games}
+    cores = {s.id: find_core(front, s) for s in SYSTEMS}
+    missing = [s for s in SYSTEMS if s.id in have and cores[s.id] is None]
+    root = env.games_root()
+    v = decide(sync.snapshot())
+    emu_ok = front.kind != "none" and not missing and (bool(have) or any(cores.values()))
+    if front.kind == "none":
+        emu_detail = "RetroArch is not installed."
+    elif missing:
+        emu_detail = "Missing cores: " + "; ".join(core_hint(s) for s in missing)
+    elif not any(cores.values()):
+        emu_detail = "RetroArch is installed. Add a core for each console you play: Main Menu > Online Updater > Core Downloader."
+    else:
+        emu_detail = "RetroArch with " + ", ".join(sorted(p.stem.replace("_libretro", "") for p in cores.values() if p))
+    last = index.last_played()
+    return {
+        "version": VERSION, "at": time.time(), "legal": LEGAL, "message": message, "playing": playing,
+        "games_root": str(root), "sync_root": str(env.sync_root),
+        "checks": [
+            {"key": "folder", "title": "Choose your games folder", "ok": root.is_dir(),
+             "detail": str(root) if root.is_dir() else "Not created yet.", "command": "xiv-arcade setup --games ~/Games/Arcade",
+             "launchbox": {"text": "I have a LaunchBox folder: copy it (or its Games, Images and Data folders) into the games "
+                                   "folder as it is, or point at it where it lives.",
+                           "command": "xiv-arcade setup --launchbox /path/to/LaunchBox",
+                           "found": [str(p) for r in [root, *env.extra_roots()] if r.is_dir() for p in find_launchbox_roots(r)]}},
+            {"key": "emulator", "title": "Install the emulator", "ok": emu_ok, "detail": emu_detail,
+             "command": install_line(env)},
+            {"key": "games", "title": "Drop your own game files in", "ok": bool(games),
+             "detail": f"{len(games)} game(s) found." if games else f"Nothing yet. Copy your own dumps into {root}/<console>/.",
+             "command": f"xdg-open {shlex.quote(str(root))}"},
+        ],
+        "sync": {"code": v.code, "label": v.label, "detail": v.detail, "can_launch": v.can_launch,
+                 "steps": pairing_steps(env, v), "conflicts": index.recent_conflicts()},
+        "systems": [{"id": s.id, "name": s.name, "folder": s.folder, "exts": list(s.exts),
+                     "core": cores[s.id].stem.replace("_libretro", "") if cores[s.id] else None,
+                     "hint": core_hint(s), "note": s.note} for s in SYSTEMS],
+        "shelf": [{"key": e.key, "title": e.title, "year": e.year, "platforms": e.platforms,
+                   "games": [g["id"] for g in games if e.key in g["ff"]]} for e in FF_SHELF],
+        "games": [{"id": g["id"], "title": g["title"], "year": g["year"], "system": g["system"], "path": g["path"], "discs": len(g["discs"]),
+                   "ff": g["ff"], "boxart": g["boxart"], "last_played": g["last_played"],
+                   "ready": cores[g["system"]] is not None} for g in games],
+        "last": last["id"] if last else None,
+    }
+
+
+def write_state(env: Env, index: Index, sync, **kw) -> dict:
+    state = build_state(env, index, sync, **kw)
+    atomic_write(env.state_path, json.dumps(state, indent=1) + "\n")
+    return state
+
+
+# --------------------------------------------------------------------------------------------
+# Launching
+# --------------------------------------------------------------------------------------------
+
+class Refused(Exception):
+    pass
+
+
+def resolve_game(index: Index, env: Env, query: str) -> dict:
+    p = Path(query).expanduser()
+    if p.is_file():
+        s = detect_system(str(p), str(env.games_root()))
+        if s is None:
+            raise Refused(f"cannot tell which console {p.name} is for; put it in a console folder under {env.games_root()}")
+        title = clean_title(p.stem)
+        return {"id": game_id(s.id, title), "title": title, "system": s.id, "path": str(p), "discs": [], "ff": ff_keys(title, s.id)}
+    games = index.games()
+    g = next((g for g in games if g["id"] == query), None) or fuzzy_pick(games, query)
+    if g is None:
+        raise Refused(f"no game matches \"{query}\"" if games else "the library is empty: " + LEGAL)
+    return g
+
+
+def plan_launch(env: Env, game: dict) -> tuple[list[str], Path]:
+    system = SYSTEM_BY_ID[game["system"]]
+    front = find_frontend(env)
+    if front.kind == "none":
+        raise Refused("RetroArch is not installed. Install it with: " + install_line(env))
+    core = find_core(front, system)
+    if core is None:
+        raise Refused("no core for " + core_hint(system))
+    return launch_argv(env, front, system, core, game["path"]), core
+
+
+def launch(env: Env, index: Index, sync, query: str, dry_run: bool = False, run=subprocess.call, wait: float = 30.0,
+           out=print) -> int:
+    game = resolve_game(index, env, query)
+    argv, core = plan_launch(env, game)
+    if dry_run:
+        out(shlex.join(argv))
+        return 0
+    verdict, resolved = settle(sync, index, env.sync_root, wait)
+    for r in resolved:
+        out(f"conflict: kept both saves; the newer is live, the other is \"{Path(r.kept_as).name}\"")
+    if not verdict.can_launch:
+        write_state(env, index, sync, message="Not launched: saves are still syncing. Try again in a moment.")
+        raise Refused("saves are still syncing; not launching until they are complete")
+    backup_saves(env, game)
+    setup_cfg = system_cfg(env, SYSTEM_BY_ID[game["system"]])
+    if not setup_cfg.is_file():
+        setup(env)
+    play = index.start_play(game["id"], core.stem.replace("_libretro", ""))
+    write_state(env, index, sync, playing={"id": game["id"], "title": game["title"]})
+    out(f"launching {game['title']} ({verdict.label})")
+    code = run(argv)
+    index.end_play(play, code)
+    verdict, resolved = settle(sync, index, env.sync_root, 5.0)
+    index.set_state("last_push", {"game": game["id"], "verdict": verdict.code})
+    write_state(env, index, sync, message=f"{game['title']} closed · {verdict.label}")
+    out(f"{game['title']} closed; saves: {verdict.label}")
+    return code
+
+
+# --------------------------------------------------------------------------------------------
+# Command line
+# --------------------------------------------------------------------------------------------
+
+def _apply(commands: list[str], apply: bool) -> int:
+    for c in commands:
+        print(("$ " if apply else "  ") + c)
+        if apply:
+            rc = subprocess.call(shlex.split(c))
+            if rc != 0:
+                print(f"stopped: that command failed ({rc}). Nothing else was run.", file=sys.stderr)
+                return rc
+    return 0
+
+
+def main(argv: list[str] | None = None) -> int:
+    ap = argparse.ArgumentParser(prog="xiv-arcade", description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    sub = ap.add_subparsers(dest="cmd", required=True)
+    p = sub.add_parser("setup", help="create folders, READMEs, RetroArch overrides, database")
+    p.add_argument("--games", help="games folder (default ~/Games/Arcade)")
+    p.add_argument("--launchbox", help="a LaunchBox folder to read where it is (or just copy it into the games folder)")
+    p = sub.add_parser("import-saves", help="copy saves/states from another RetroArch install; never over a newer save")
+    p.add_argument("path")
+    for name in ("scan", "state", "list", "last"):
+        sub.add_parser(name)
+    p = sub.add_parser("launch")
+    p.add_argument("--dry-run", action="store_true", help="print the exact emulator command and stop")
+    p.add_argument("query", nargs="+")
+    p = sub.add_parser("sync", help="force a save sync and show status")
+    p.add_argument("--wait", type=float, default=20.0)
+    p = sub.add_parser("sync-setup", help="print the Syncthing folder config (XML and commands)")
+    p.add_argument("--apply", action="store_true", help="run the printed syncthing commands yourself-by-proxy")
+    p = sub.add_parser("pair", help="print this device's id, or the commands that pair DEVICE-ID")
+    p.add_argument("device", nargs="?")
+    p.add_argument("--name", default="arcade-peer")
+    p.add_argument("--address", help="e.g. tcp://<tailscale-name>:22000 to keep traffic on your tailnet")
+    p.add_argument("--apply", action="store_true")
+    a = ap.parse_args(argv)
+
+    env = Env(Path.home())
+    if a.cmd == "sync-setup":
+        setup(env)
+        print("Syncthing folder for the Arcade saves (file versioning: staggered, one year; conflicts: never dropped).\n")
+        print("Either paste this into config.xml inside <configuration> while Syncthing is stopped:\n")
+        print(syncthing_folder_xml(env) + "\n\nor run these while it is running" + (":" if a.apply else " (add --apply to run them):"))
+        return _apply(syncthing_folder_commands(env), a.apply)
+    if a.cmd == "pair":
+        if not a.device:
+            print("This device's ID (give it to the other machine):")
+            return subprocess.call(["syncthing", "--device-id"]) if env.which("syncthing") else print(
+                "  syncthing is not installed here: " + syncthing_install_line(env)) or 1
+        print("Pairs the other machine and shares the Arcade saves with it" + (":" if a.apply else " (add --apply to run):"))
+        return _apply(pair_commands(a.device, a.name, a.address), a.apply)
+
+    setup(env, getattr(a, "games", None), getattr(a, "launchbox", None))
+    index, sync = Index(env.db_path), Syncthing(env)
+    try:
+        if a.cmd in ("setup", "scan", "state", "list"):
+            if a.cmd != "state" or not index.games():
+                index.replace_library(scan(env))
+            state = write_state(env, index, sync)
+            if a.cmd == "list":
+                for g in state["games"]:
+                    print(f"{SYSTEM_BY_ID[g['system']].name:28} {g['title']}" + ("" if g["ready"] else "   (core missing)"))
+                if not state["games"]:
+                    print("No games yet. " + LEGAL)
+            else:
+                for c in state["checks"]:
+                    print(f"[{'x' if c['ok'] else ' '}] {c['title']}: {c['detail']}" + ("" if c["ok"] else f"\n      {c['command']}"))
+                print(f"Saves: {state['sync']['label']}. {state['sync']['detail']}")
+                for s in state["sync"]["steps"]:
+                    print(f"  - {s['text']}\n      {s['command']}")
+            return 0
+        if a.cmd == "import-saves":
+            index.replace_library(scan(env))
+            src = Path(a.path).expanduser()
+            if not src.is_dir():
+                raise Refused(f"{src} is not a folder")
+            r = import_saves(env, index, src)
+            msg = (f"{len(r['imported'])} save(s) imported, {len(r['kept_newer'])} left alone because the one here is newer, "
+                   f"{len(r['unknown'])} not recognised")
+            for u in r["unknown"]:
+                print("not recognised (no matching game or core folder): " + u)
+            sync.rescan()
+            write_state(env, index, sync, message=msg)
+            print(msg)
+            return 0
+        if a.cmd == "sync":
+            v, resolved = settle(sync, index, env.sync_root, a.wait)
+            for r in resolved:
+                print(f"conflict: kept both; live \"{Path(r.live).name}\", other \"{Path(r.kept_as).name}\"")
+            write_state(env, index, sync, message="Sync checked · " + v.label)
+            print(f"{v.label}. {v.detail}")
+            return 0 if v.can_launch else 3
+        index.replace_library(scan(env))
+        if a.cmd == "last":
+            g = index.last_played()
+            if g is None:
+                raise Refused("nothing has been played yet")
+            return launch(env, index, sync, g["id"])
+        return launch(env, index, sync, " ".join(a.query), dry_run=a.dry_run)
+    except Refused as e:
+        print("xiv-arcade: " + str(e), file=sys.stderr)
+        write_state(env, index, sync, message=str(e))
+        return 2
+    finally:
+        index.close()
+
+
+if __name__ == "__main__":
+    sys.exit(main())
