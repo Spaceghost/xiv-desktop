@@ -238,7 +238,7 @@ Installation and interaction details remain in [GUIDE.md](GUIDE.md).
 
 | Interface | Role |
 | --- | --- |
-| `/npc <question>` | Client-side speaker and Talk-style dialogue backed by Almanac's local gateway. `/npc bye` dismisses; `/npc who` opens the picker. |
+| `/npc <question>` | **In progress.** The Talk-style dialogue works; the speaker's body does not appear in the world yet ([what was tried](docs/NPC-SPAWN.md)). Client-side speaker and dialogue backed by Almanac's local gateway. `/npc bye` dismisses; `/npc who` opens the picker. |
 | `/claude` / `/claude <prompt>` | Claude Code session UI with streaming text, tool cards and permission dialogs through Ghostty agent jobs. |
 
 These are not dependencies of the desktop catalog and are **not verified in

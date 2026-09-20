@@ -13,6 +13,12 @@ Statuses mean the same thing in every one of these mods:
 * **BETA** — merged, but not yet verified in game.
 * **SOON** — still being built.
 
+## [Unreleased] — In the workshop
+
+Still being built; not in a release yet.
+
+* In progress: the `/npc` speaker's body. The dialogue works, but the character never appears in the world yet. The speaker is now built with the game's own creature setup (nothing is copied from your character: no gear, no name, no company tag), and every step reports to the Dalamud log, which is how the cause was narrowed down. What was tried and what to try next is in docs/NPC-SPAWN.md.
+
 ## [1.0.0] — Released 2026-09-20
 
 BETA entries are in this release but have not been verified in game yet; they become NEW or FIX once they have been seen working.

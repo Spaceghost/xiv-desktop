@@ -24,6 +24,9 @@ public sealed unsafe class LocalActor : IDisposable
     private bool drawn;
     private float fade;
     private float drawWait;
+    private bool needsRedraw;
+    private float settle;
+    private float nudge;
 
     private LocalActor(ushort index, Character* chara)
     {
@@ -48,7 +51,7 @@ public sealed unsafe class LocalActor : IDisposable
     public bool Drawn => drawn;
 
     /// <summary>Creates the actor. Returns null with a reason when the game refused or something looked wrong.</summary>
-    public static LocalActor? Spawn(NpcLook? look, Character* copyFrom, string name, Vector3 position, float yaw, out string error)
+    public static LocalActor? Spawn(NpcLook? look, Character* copyFrom, string name, Vector3 position, float yaw, out string error, uint bnpcBaseId = 0, bool exactModel = true)
     {
         error = "";
         var com = ClientObjectManager.Instance();
@@ -83,7 +86,25 @@ public sealed unsafe class LocalActor : IDisposable
             }
             else if (look is not null)
             {
-                Dress(chara, look);
+                // A character straight out of CreateBattleCharacter has no model setup, and the
+                // game never builds anything to draw for it. For a creature, let the game's own
+                // SetupBNpc build it from a BNpcBase row that uses the same model: nothing is
+                // borrowed from the player (no gear, no name, no company tag).
+                if (!look.IsHuman && bnpcBaseId != 0)
+                {
+                    chara->CharacterSetup.SetupBNpc(bnpcBaseId, 0);
+                    if (!exactModel)
+                    {
+                        // No creature uses this model: keep the clean setup, swap the model in,
+                        // and have the game rebuild what it draws.
+                        chara->ModelContainer.ModelCharaId = look.ModelCharaId;
+                        actor.needsRedraw = true;
+                    }
+                }
+                else
+                {
+                    Dress(chara, look);
+                }
             }
 
             SetName(&chara->GameObject, name);
@@ -140,14 +161,31 @@ public sealed unsafe class LocalActor : IDisposable
     /// Per frame: turns drawing on once the model is ready (giving up after <paramref name="timeout"/>
     /// seconds) and fades in. Returns false when the actor is gone or never became drawable.
     /// </summary>
-    public bool Tick(float dt, float fadeSeconds = 0.6f, float timeout = 5f)
+    public bool Tick(float dt, float fadeSeconds = 0.6f, float timeout = 8f)
     {
         var c = Chara;
         if (c == null)
             return false;
         if (!drawn)
         {
+            if (needsRedraw)
+            {
+                // The look changed after the copy: drop the copied model so the game builds
+                // the NPC's own, then give it a moment before asking whether it is ready
+                // (asked in the same frame, "ready" still describes the model just dropped).
+                needsRedraw = false;
+                settle = 0.35f;
+                c->GameObject.DisableDraw();
+                return true;
+            }
+
             drawWait += dt;
+            if (settle > 0)
+            {
+                settle -= dt;
+                return true;
+            }
+
             if (c->GameObject.IsReadyToDraw())
             {
                 c->GameObject.EnableDraw();
@@ -159,6 +197,28 @@ public sealed unsafe class LocalActor : IDisposable
             }
 
             return true;
+        }
+
+        // The game re-checks its own characters until their model shows; nobody does that for
+        // one a plugin made. Keep asking for a few seconds while the model exists but is hidden.
+        if (nudge < 6f)
+        {
+            nudge += dt;
+            var d = c->GameObject.DrawObject;
+            if (d != null && !d->IsVisible && nudge > 1.5f)
+            {
+                // 0x800 is the game's "still loading" draw state (the same bit Penumbra and
+                // Glamourer wait on). The game clears it for its own characters once their
+                // model is in; for one made here nothing does, and any set bit keeps the
+                // model hidden. The model has had its time to load: clear it and show.
+                const int StillLoading = 0x800;
+                var flags = (int)c->GameObject.RenderFlags;
+                if ((flags & StillLoading) != 0)
+                    c->GameObject.RenderFlags = (FFXIVClientStructs.FFXIV.Client.Game.Object.VisibilityFlags)(flags & ~StillLoading);
+            }
+
+            if ((d == null || !d->IsVisible) && c->GameObject.IsReadyToDraw())
+                c->GameObject.EnableDraw();
         }
 
         if (fade < 1f)
@@ -193,6 +253,17 @@ public sealed unsafe class LocalActor : IDisposable
         var c = Chara;
         if (c != null && timeline != 0)
             c->Timeline.TimelineSequencer.PlayTimeline(timeline);
+    }
+
+    /// <summary>One line about what the game made of this character, for the log.</summary>
+    public string Describe()
+    {
+        var c = Chara;
+        if (c == null)
+            return "gone";
+        return $"index {index}, kind {c->GameObject.ObjectKind}/{c->GameObject.SubKind}, model {c->ModelContainer.ModelCharaId}, " +
+               $"drawObject {(c->GameObject.DrawObject == null ? "NULL" : c->GameObject.DrawObject->IsVisible ? "present+VISIBLE" : "present but HIDDEN")}, renderFlags {c->GameObject.RenderFlags}, alpha {c->Alpha:F2}, " +
+               $"scale {c->GameObject.Scale:F2}, pos {c->GameObject.Position}";
     }
 
     public Vector3 Position => Chara is var c && c != null ? c->GameObject.Position : default;
