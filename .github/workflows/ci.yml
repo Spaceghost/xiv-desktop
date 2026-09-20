@@ -26,9 +26,11 @@ jobs:
         with:
           persist-credentials: false
 
+      # From global.json, not a hand-written 10.0.x: the pin is what the build
+      # actually requires, and a runner image's own 10.0.x may be below it.
       - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
         with:
-          dotnet-version: '10.0.x'
+          global-json-file: global.json
 
       - name: Check the plugin manifest
         run: tools/check-manifest.py
