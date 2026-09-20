@@ -1,0 +1,43 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="730" height="380" viewBox="0 0 730 380">
+  <title>XivDesktop for FFXIV: launch Linux desktop apps into the game world</title>
+  <defs>
+    <linearGradient id="sky" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#050a1c"/><stop offset="0.6" stop-color="#0e1d45"/><stop offset="1" stop-color="#1b3568"/></linearGradient>
+    <linearGradient id="gold" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#fbeab5"/><stop offset="0.5" stop-color="#d6a854"/><stop offset="1" stop-color="#94682c"/></linearGradient>
+    <linearGradient id="cL" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#c9f6ff"/><stop offset="1" stop-color="#2a8bd3"/></linearGradient>
+    <linearGradient id="cR" x1="1" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#63cdf7"/><stop offset="1" stop-color="#134a88"/></linearGradient>
+    <radialGradient id="halo" cx="50%" cy="50%" r="50%"><stop offset="0" stop-color="#8fe3ff" stop-opacity="0.55"/><stop offset="1" stop-color="#4fb0f0" stop-opacity="0"/></radialGradient>
+    <filter id="glow" x="-60%" y="-60%" width="220%" height="220%"><feGaussianBlur stdDeviation="4" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge></filter>
+  </defs>
+  <rect width="730" height="380" fill="url(#sky)"/>
+  <g fill="#cfe8ff" opacity="0.9"><circle cx="48" cy="46" r="2"/><circle cx="120" cy="30" r="1.5"/><circle cx="205" cy="62" r="1.8"/><circle cx="612" cy="40" r="2"/><circle cx="676" cy="96" r="1.6"/><circle cx="540" cy="26" r="1.4"/><circle cx="352" cy="24" r="1.4"/></g>
+  <g transform="translate(120,150)">
+    <circle r="92" fill="url(#halo)"/>
+    <path d="M-88 6 A92 17 0 0 1 88 6" fill="none" stroke="url(#gold)" stroke-width="6" opacity="0.9"/>
+    <g filter="url(#glow)"><path d="M0 -74 L29 -8 L0 46 Z" fill="url(#cR)"/><path d="M0 -74 L-29 -8 L0 46 Z" fill="url(#cL)"/></g>
+  </g>
+  <!-- the launcher palette -->
+  <g transform="translate(40,236)">
+    <rect width="200" height="112" rx="12" fill="#0a1430" fill-opacity="0.92" stroke="url(#gold)" stroke-width="3"/>
+    <rect x="12" y="12" width="176" height="22" rx="6" fill="#16305c"/>
+    <path d="M22 23 H96" stroke="#bcd8ff" stroke-width="4" stroke-linecap="round"/>
+    <g stroke-linecap="round" stroke-width="4"><path d="M22 52 H150" stroke="#7fdcff"/><path d="M22 70 H128" stroke="#56709c"/><path d="M22 88 H140" stroke="#56709c"/></g>
+  </g>
+  <!-- app windows, pinned in the world at different depths -->
+  <g transform="translate(286,52)">
+    <rect width="250" height="168" rx="12" fill="#0a1430" fill-opacity="0.94" stroke="url(#gold)" stroke-width="3"/>
+    <path d="M2 30 H248" stroke="url(#gold)" stroke-width="2" opacity="0.8"/>
+    <g fill="#d6a854"><circle cx="18" cy="16" r="5"/><circle cx="36" cy="16" r="5" opacity="0.7"/><circle cx="54" cy="16" r="5" opacity="0.45"/></g>
+    <rect x="16" y="44" width="92" height="108" rx="6" fill="#12254c"/>
+    <g stroke="#7fdcff" stroke-width="4" stroke-linecap="round" opacity="0.9"><path d="M124 56 H232"/><path d="M124 74 H210"/><path d="M124 92 H224"/><path d="M124 110 H188"/></g>
+  </g>
+  <g transform="translate(470,170) skewY(-4)">
+    <rect width="220" height="150" rx="12" fill="#0a1430" fill-opacity="0.94" stroke="url(#gold)" stroke-width="3"/>
+    <path d="M2 28 H218" stroke="url(#gold)" stroke-width="2" opacity="0.8"/>
+    <g>
+      <rect x="18" y="42" width="40" height="40" rx="9" fill="#5cc8f5" filter="url(#glow)"/><rect x="68" y="42" width="40" height="40" rx="9" fill="#2a8bd3"/><rect x="118" y="42" width="40" height="40" rx="9" fill="#d6a854"/><rect x="168" y="42" width="36" height="40" rx="9" fill="#1f4b86"/>
+      <rect x="18" y="92" width="40" height="40" rx="9" fill="#1f4b86"/><rect x="68" y="92" width="40" height="40" rx="9" fill="#fbeab5"/><rect x="118" y="92" width="40" height="40" rx="9" fill="#2a8bd3"/><rect x="168" y="92" width="36" height="40" rx="9" fill="#5cc8f5" opacity="0.8"/>
+    </g>
+  </g>
+  <text x="262" y="276" font-family="Georgia, 'Times New Roman', serif" font-size="30" fill="#f6e2a4">XivDesktop</text>
+  <text x="262" y="302" font-family="Georgia, 'Times New Roman', serif" font-size="14" fill="#9fc4ee">your apps, in the world</text>
+</svg>
