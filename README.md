@@ -95,9 +95,9 @@ https://spacegho.st/mods/ffxiv/plugins.json
 3. Confirm the compatible Ghostty plugin and its host agent are running, then
    open `/desktop`.
 
-A testing-only plugin may require **Get plugin testing builds** under the
-experimental settings. When a stable entry exists, its per-plugin **Testing**
-option selects early builds. See the
+XivDesktop has a stable release, so it shows up for everyone. For test builds
+ahead of a release, right-click its entry → **Receive plugin testing versions**.
+See the
 [feed instructions](https://spacegho.st/mods/ffxiv/plugins/) and
 [repository releases](https://github.com/Spaceghost/xivdesktop-dalamud/releases)
 for the available build. The feed does not install a host compositor for you,
