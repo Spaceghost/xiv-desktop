@@ -48,6 +48,26 @@ Details: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
   and launching is disabled. XivDesktop can only see whether ghostty-dalamud's IPC is registered. It cannot
   see whether the agent is running, so a launch that ghostty accepts may still produce no window.
 
+## Install (from the plugin repository)
+
+XivDesktop is listed in the author's own third-party Dalamud repository, next to the
+other FFXIV mods there. In game:
+
+1. `/xlsettings` → **Experimental** → **Custom Plugin Repositories** → paste
+   `https://spacegho.st/mods/ffxiv/plugins.json` → **+** → **Save and close**.
+2. `/xlplugins` → **All Plugins** → search **XivDesktop** → **Install**.
+
+While XivDesktop only has test builds, it shows up only for players who opted in:
+`/xlsettings` → **Experimental** → **Get plugin testing builds**. Once it has a
+stable release, ticking testing on its own entry is enough to get test builds early.
+<https://spacegho.st/mods/ffxiv/plugins/> walks through the same steps. It is a
+third-party repository: Dalamud will say nobody but the author reviewed it, which is
+true. Releases are built on GitHub Actions from a tag (`.github/workflows/release.yml`);
+`v1.2.3` is a stable release, `v1.2.3-test.1` moves the floating `testing` release.
+
+You do not need any of that to run it: building it yourself, below, is the path the
+author develops on, and it stays supported for anyone who wants to read the code first.
+
 ## Install (dev plugin)
 
 ```sh
