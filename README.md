@@ -10,6 +10,8 @@
 
 <img src="images/icon.png" width="96" height="96" align="right" alt="XivDesktop icon">
 
+**[Site](https://spacegho.st/mods/ffxiv/xivdesktop/) · [Install](https://spacegho.st/mods/ffxiv/plugins/) · [Vote on what's next](https://spacegho.st/mods/ffxiv/xivdesktop/vote/) · [Screenshots](https://spacegho.st/mods/ffxiv/term/gallery/?mod=xivdesktop) · [Changelog](CHANGELOG.md)**
+
 **Your Linux applications, organized inside FINAL FANTASY XIV.**
 
 XivDesktop is a Dalamud launcher for the Linux host's apps: search, favourites,
