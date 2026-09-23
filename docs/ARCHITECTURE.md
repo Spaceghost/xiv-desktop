@@ -26,7 +26,7 @@ Plugin (IDalamudPlugin)
  │   └─ GhosttyPostBackend    fallback launch (window pull run) and /term lines (new, ask, toggle)
  ├─ DesktopService         resolve / launch / favourites / recents / status; any thread in, framework thread for writes
  ├─ SessionService         target panel, workspaces (WorkspaceModel → window.place hide), focus cycling, notifications
- ├─ KeybindService         IFramework.Update: IKeyState (GetAsyncKeyState fallback) → ChordTracker → CommandRunner
+ ├─ KeybindService         IFramework.Update: IKeyState (GetAsyncKeyState fallback) → ModifierGate → ChordTracker → CommandRunner
  ├─ CommandRunner          runs palette rows and key actions
  ├─ PaletteWindow          Super+D / /desktop; PaletteEngine over a PaletteContext snapshot
  ├─ LauncherWindow         /desktop apps: the v0 icon grid
