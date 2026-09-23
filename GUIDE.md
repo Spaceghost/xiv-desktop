@@ -217,6 +217,12 @@ All configurable in Settings → **Keybinds** (type a chord such as `Super+Shift
   modifier in Settings → Keybinds → *Modifier* and **Reset all to this modifier**: *Alt+Shift* (Shift
   variants become Ctrl+Alt+Shift) or *Ctrl+Alt* (Shift variants become Ctrl+Alt+Shift). The game itself
   binds some Alt and Ctrl chords; check the game's keybind settings for clashes.
+- **A stuck Super (GNOME).** GNOME takes Super for the overview; Wine sees the press but not the release,
+  and its resync when the game gets focus back skips the Windows keys, so `GetAsyncKeyState` keeps VK_LWIN
+  down until Super is pressed again. XivDesktop therefore counts Super as held only once it has seen it go
+  from up to down with the game in the foreground; a focus loss forgets it, and a hold longer than ten
+  seconds needs a fresh press. Shift, Ctrl and Alt get the same edge rule when read with `GetAsyncKeyState`.
+  A stale modifier then costs one missed chord, never a bare key firing one. Host-tested only.
 - On an older ghostty-dalamud without the v1.1 methods (XivDesktop probes with `focus.get`),
   Super+Space falls back to `window.place` with `here` / `pet`, Super+Left/Right to XivDesktop's own cycle
   over this workspace's window panels, Super+Enter to the terminal line, and hiding to `/term pin hide`.

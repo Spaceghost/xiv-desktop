@@ -291,6 +291,7 @@ or another branch's methods have shipped.
 | Too few apps appear | Check whether the agent catalog is available. The Wine/Flatpak fallback may see only sandboxed paths; compare with the host scanner. |
 | Icons are letter tiles | PNG may be absent or inaccessible; SVG-only icons are not rendered. |
 | Super+D does nothing | Open `/desktop` directly, then resolve host-desktop/game key conflicts or choose another modifier. |
+| Plain D opens the palette (GNOME) | GNOME takes Super for the overview, so Wine sees Super go down but not up and keeps reporting it held until the next Super press. XivDesktop now only counts Super after seeing it pressed in game (host-tested, not yet verified in game); on older builds press and release Super once, or pick another modifier. |
 | A panel action fails while simpler ones work | Check the actual Ghostty method/capability. Older window-only backends do not provide all panel operations. |
 
 Include the XivDesktop and Ghostty commits/versions, host OS, launcher packaging

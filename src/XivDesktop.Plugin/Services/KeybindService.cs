@@ -16,6 +16,12 @@ namespace XivDesktop.Plugin.Services;
 /// Windows keys (VK_LWIN/VK_RWIN), so those, and every key with <see cref="Configuration.ReadKeysGlobally"/>,
 /// fall back to GetAsyncKeyState, and only while the game window is in the foreground.
 /// </para>
+/// <para>
+/// Modifiers that can go stale (Super always, the others when read asynchronously) are answered by a
+/// <see cref="ModifierGate"/>: held only once their press was seen with the game in the foreground. Under Wine
+/// on GNOME the shell eats Super's release, and GetAsyncKeyState would otherwise report Super down until it
+/// was pressed again, turning every plain D into Super+D.
+/// </para>
 /// </summary>
 public sealed class KeybindService : IDisposable
 {
@@ -25,6 +31,9 @@ public sealed class KeybindService : IDisposable
     private readonly Configuration config;
     private readonly Action<string> run;
     private readonly ChordTracker tracker = new();
+    private readonly ModifierGate modifiers = new();
+    private readonly Func<int, bool> isDown;
+    private readonly Func<int, bool> rawDown;
     private readonly Dictionary<int, bool> validCache = [];
     private Dictionary<string, string>? compiledFrom;
 
@@ -38,6 +47,8 @@ public sealed class KeybindService : IDisposable
         this.log = log;
         this.config = config;
         this.run = run;
+        isDown = IsDown;
+        rawDown = RawDown;
         Recompile();
         framework.Update += OnUpdate;
     }
@@ -63,7 +74,11 @@ public sealed class KeybindService : IDisposable
     private void OnUpdate(IFramework fw)
     {
         if (!config.KeybindsEnabled)
+        {
+            modifiers.Reset();
             return;
+        }
+
         try
         {
             if (!ReferenceEquals(compiledFrom, config.Keybinds))
@@ -71,14 +86,17 @@ public sealed class KeybindService : IDisposable
             if (!GameInForeground())
             {
                 tracker.Reset();
+                modifiers.Reset();
                 return;
             }
+
+            modifiers.Update(rawDown, foreground: true, Environment.TickCount64);
 
             // While a ghostty panel has the keyboard, ghostty sets WantTextInput every frame, and Dalamud then
             // withholds key messages from the game, so IKeyState sees nothing. With global reading the chords
             // still work then (the keys also reach the panel); an ImGui text field of anyone else still blocks.
             var blocked = ImGui.GetIO().WantTextInput && !(config.ReadKeysGlobally && panelHasKeyboard() && !ImGui.IsAnyItemActive());
-            var (fired, consumed) = tracker.Update(IsDown, blocked);
+            var (fired, consumed) = tracker.Update(isDown, blocked);
             foreach (var vk in consumed)
             {
                 if (IsValid(vk))
@@ -97,12 +115,12 @@ public sealed class KeybindService : IDisposable
         }
     }
 
-    private bool IsDown(int vk)
-    {
-        if (!config.ReadKeysGlobally && IsValid(vk))
-            return keys[(VirtualKey)vk];
-        return AsyncDown(vk);
-    }
+    /// <summary>What chords are matched against: guarded modifiers from the gate, everything else raw.</summary>
+    private bool IsDown(int vk) => ModifierGate.Guards(vk, ReadsAsync(vk)) ? modifiers.IsHeld(vk) : RawDown(vk);
+
+    private bool RawDown(int vk) => ReadsAsync(vk) ? AsyncDown(vk) : keys[(VirtualKey)vk];
+
+    private bool ReadsAsync(int vk) => config.ReadKeysGlobally || !IsValid(vk);
 
     private bool IsValid(int vk)
     {
