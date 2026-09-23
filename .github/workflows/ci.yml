@@ -1,6 +1,16 @@
 # Every push and pull request: the Dalamud plugin's manifest check, build, tests and
-# packaging. GitHub-hosted runners only; nothing here touches a machine of the author's,
-# and nothing here needs the game.
+# packaging. Nothing here needs the game.
+#
+# Where it runs: this repository's own runs (pushes, pull requests from its own
+# branches, manual runs) go to the fedora build host, where ci-dispatchd boots
+# a one-shot, network-isolated container from the ci-runner-dalamud image (.NET 10
+# SDK and the current Dalamud reference assemblies already in it) for this one job
+# and destroys it afterwards. A pull request from a fork, or any run inside a fork,
+# goes to GitHub's ubuntu-latest instead: a self-hosted runner executes whatever the
+# workflow file says, and a fork's pull request can rewrite it. The dispatcher
+# refuses fork pull requests on its own as well. Setting the repository variable
+# CI_SELF_HOSTED to "false" sends every run to ubuntu-latest (the build host is
+# down, say).
 name: CI
 
 on:
@@ -17,7 +27,13 @@ concurrency:
 jobs:
   dalamud:
     name: Dalamud plugin
-    runs-on: ubuntu-latest
+    runs-on: >-
+      ${{ (vars.CI_SELF_HOSTED == 'false'
+            || github.event.repository.fork
+            || (github.event_name == 'pull_request'
+                && github.event.pull_request.head.repo.full_name != github.repository))
+          && 'ubuntu-latest'
+          || fromJSON('["self-hosted","xivdesktop-dalamud","fedora-dalamud"]') }}
     timeout-minutes: 30
     env:
       DALAMUD_HOME: ${{ github.workspace }}/.dalamud
@@ -28,7 +44,19 @@ jobs:
 
       # From global.json, not a hand-written 10.0.x: the pin is what the build
       # actually requires, and a runner image's own 10.0.x may be below it.
-      - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
+      # The self-hosted image already has a .NET 10 SDK; `dotnet --version` in the
+      # checkout is global.json's own test of whether it satisfies the pin.
+      - name: Probe for the .NET SDK
+        id: dotnet
+        run: |
+          if command -v dotnet >/dev/null && dotnet --version >/dev/null 2>&1; then
+            echo "have=true" >>"$GITHUB_OUTPUT"
+          else
+            echo "have=false" >>"$GITHUB_OUTPUT"
+          fi
+      - name: Install the .NET SDK
+        if: steps.dotnet.outputs.have != 'true'
+        uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
         with:
           global-json-file: global.json
 
@@ -37,6 +65,11 @@ jobs:
 
       - name: Check that CHANGELOG.md matches changelog.json
         run: tools/changelog.py --check
+
+      # The self-hosted image carries the current Dalamud release; dalamud-seed copies
+      # it into DALAMUD_HOME only while it is still the live one, else does nothing.
+      - name: Seed the Dalamud reference assemblies from the runner image
+        run: if command -v dalamud-seed >/dev/null; then dalamud-seed "$DALAMUD_HOME"; fi
 
       - name: Fetch the Dalamud reference assemblies
         run: tools/fetch-dalamud.sh
