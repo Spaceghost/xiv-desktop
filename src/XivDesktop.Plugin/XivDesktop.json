@@ -2,7 +2,7 @@
   "Author": "Johnneylee Jack Rollins",
   "Name": "XivDesktop",
   "InternalName": "XivDesktop",
-  "AssemblyVersion": "1.0.1.0",
+  "AssemblyVersion": "1.0.2.1",
   "Punchline": "Launch Linux desktop apps into the game world (needs ghostty-dalamud).",
   "Description": "An app launcher for FINAL FANTASY XIV running under Wine on Linux. Lists the host's freedesktop applications and opens them as world panels through ghostty-dalamud's remote windows. Optional Umbra toolbar widget. In progress: /npc, a speaker you can ask questions in game (the dialogue works; the speaker does not appear in the world yet).",
   "ApplicableVersion": "any",
