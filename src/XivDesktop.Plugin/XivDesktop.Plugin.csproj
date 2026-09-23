@@ -11,6 +11,6 @@
   </ItemGroup>
   <ItemGroup>
     <!-- Native (AtkUnitBase) dialogue and picker for Ask an NPC. MIT, github.com/MidoriKami/KamiToolKit; built for Dalamud API 15. -->
-    <PackageReference Include="KamiToolKit" Version="2.2.48" />
+    <PackageReference Include="KamiToolKit" Version="2.2.49" />
   </ItemGroup>
 </Project>
