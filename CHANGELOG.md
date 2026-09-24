@@ -13,9 +13,9 @@ Statuses mean the same thing in every one of these mods:
 * **BETA** — merged, but not yet verified in game.
 * **SOON** — still being built.
 
-## [Unreleased] — In the workshop
+## [1.0.2] — Released 2026-09-23
 
-Everything here is merged into master. BETA means exactly that and no more: merged, and not yet seen working in the game.
+BETA entries are in this release but have not been verified in game yet; they become NEW or FIX once they have been seen working.
 
 * Pressing plain `d` could open the launcher palette as if it were Super+D, and keep doing so until Super+D was pressed again (seen on GNOME under Wine: the desktop takes Super's release, so Wine kept reporting Super held). Super now only counts once XivDesktop has seen it pressed while the game is in front; switching away forgets it, and a hold over ten seconds needs a fresh press. Fixed in host tests; not yet verified in game.
 * `/arcade` moved out of XivDesktop into its own mod, XivArcade, before it was ever released here. Your `~/Games/Arcade` folder, library and save-sync setup carry over untouched. When both mods are installed, the launcher palette still finds your classic games by name (an `Arcade` badge), through XivArcade's IPC; XivDesktop no longer has the `/arcade` command or window itself.
